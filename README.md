@@ -35,6 +35,7 @@ A set of lightweight Bash utility scripts designed to automate Git commit messag
 ```text
 gemini-generate-commit-message   Core script containing diff parsing, token limiting, API payload generation, and response formatting.
 gemini-list-models               Utility script that queries and lists available models from the Gemini API.
+gemini-pick-model                Interactive utility to choose and save the default model to configuration.
 ggic                             Wrapper script that stages changes, generates the commit message, and commits.
 ggicp                            Wrapper script that stages changes, generates the commit message, commits, and pushes to origin.
 install.sh                       Download and installation script to place utilities into local bin directories and check PATH settings.
@@ -101,6 +102,12 @@ To list out all available models for your API key, execute:
 
 ```bash
 gemini-list-models
+```
+
+To interactively pick and persist a new default model in your configuration:
+
+```bash
+gemini-pick-model
 ```
 
 ---

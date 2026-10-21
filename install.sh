@@ -4,7 +4,7 @@ set -euo pipefail
 install_dir="${XDG_BIN_HOME:-${HOME}/.local/bin}"
 base_url="https://raw.githubusercontent.com/unamatasanatarai/gemini-generate-commit-message/master"
 
-files=("ggic" "ggicp" "gemini-generate-commit-message" "gemini-list-models")
+files=("ggic" "ggicp" "gemini-generate-commit-message" "gemini-list-models" "gemini-pick-model")
 
 if ! command -v curl >/dev/null 2>&1; then
     printf '%s\n' 'curl is required' >&2
@@ -68,6 +68,7 @@ printf '%s\n' '  ggic'
 printf '%s\n' '  ggicp'
 printf '%s\n' '  gemini-generate-commit-message'
 printf '%s\n' '  gemini-list-models'
+printf '%s\n' '  gemini-pick-model'
 
 printf '\n%s\n' 'configuration:'
 printf '  please paste your gemini api key into:\n'

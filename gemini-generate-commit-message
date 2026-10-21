@@ -6,6 +6,54 @@ XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 
 config_dir="${XDG_CONFIG_HOME}/gemini-commit-message"
 key_file="${config_dir}/key"
+model_file="${config_dir}/model"
+
+cli_model=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --model)
+        if [[ -n "${2:-}" ]]; then
+            cli_model="$2"
+            shift
+        fi
+        ;;
+    --model=*)
+        cli_model="${1#*=}"
+        ;;
+    -h | --help)
+        printf 'Usage: %s [--model <model_name>]\n' "${0##*/}"
+        exit 0
+        ;;
+    *)
+        printf 'Usage: %s [--model <model_name>]\n' "${0##*/}" >&2
+        exit 2
+        ;;
+    esac
+    shift
+done
+
+model=""
+
+if [[ -n "${cli_model}" ]]; then
+    model="${cli_model}"
+elif [[ -f "${model_file}" ]]; then
+    IFS= read -r saved_model <"${model_file}" || true
+    if [[ -n "${saved_model}" ]]; then
+        model="${saved_model}"
+    fi
+fi
+
+if [[ -z "${model}" ]]; then
+    model="${GEMINI_SUMMARY_MODEL:-${GIT_SUMMARY_MODEL:-gemini-3.5-flash-lite}}"
+fi
+
+if [[ ! "${model}" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+    printf "Error: invalid model name: %s\n" "${model}" >&2
+    exit 10
+fi
+
+printf "Model: %s\n" "${model}" >&2
 
 tmp_dir="$(mktemp -d -t gemini-commit.XXXXXX)"
 trap 'rm -rf "${tmp_dir}"' EXIT INT TERM HUP
@@ -16,13 +64,6 @@ payload_file="${tmp_dir}/payload.json"
 response_file="${tmp_dir}/response.json"
 status_file="${tmp_dir}/status.txt"
 message_file="${tmp_dir}/message.txt"
-
-model="${GEMINI_SUMMARY_MODEL:-${GIT_SUMMARY_MODEL:-gemini-3.5-flash-lite}}"
-
-if [[ ! "${model}" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-    printf "Error: invalid model name: %s\n" "${model}" >&2
-    exit 10
-fi
 
 for dep in git curl jq mkdir head; do
     if ! command -v "${dep}" >/dev/null 2>&1; then
@@ -130,8 +171,6 @@ jq -n \
             maxOutputTokens: 2048
         }
     }' >"${payload_file}"
-
-printf "Prompting model: %s...\n" "${model}" >&2
 
 curl -sS \
     -w "%{http_code}" \

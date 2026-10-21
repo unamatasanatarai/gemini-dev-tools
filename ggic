@@ -3,6 +3,7 @@ set -euo pipefail
 
 push_after_commit=false
 staged_only=false
+cli_model=""
 current_branch=""
 line=""
 message=""
@@ -28,12 +29,21 @@ while [[ $# -gt 0 ]]; do
     --staged-only)
         staged_only=true
         ;;
+    --model)
+        if [[ -n "${2:-}" ]]; then
+            cli_model="$2"
+            shift
+        fi
+        ;;
+    --model=*)
+        cli_model="${1#*=}"
+        ;;
     -h | --help)
-        printf 'Usage: %s [--push] [--staged-only]\n' "${0##*/}"
+        printf 'Usage: %s [--push] [--staged-only] [--model <model_name>]\n' "${0##*/}"
         exit 0
         ;;
     *)
-        printf 'Usage: %s [--push] [--staged-only]\n' "${0##*/}" >&2
+        printf 'Usage: %s [--push] [--staged-only] [--model <model_name>]\n' "${0##*/}" >&2
         exit 2
         ;;
     esac
@@ -80,7 +90,12 @@ if git diff --cached --quiet; then
     exit 0
 fi
 
-"${generator}" >"${message_file}"
+generator_args=()
+if [[ -n "${cli_model}" ]]; then
+    generator_args+=(--model "${cli_model}")
+fi
+
+"${generator}" ${generator_args[@]+"${generator_args[@]}"} >"${message_file}"
 
 while IFS= read -r line || [[ -n "${line}" ]]; do
     message+="${line}"$'\n'
