@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+key_file="${XDG_CONFIG_HOME}/gemini-commit-message/key"
+
+for dep in curl jq; do
+    if ! command -v "${dep}" >/dev/null 2>&1; then
+        printf "Error: missing dependency: %s\n" "${dep}" >&2
+        exit 1
+    fi
+done
+
+if [[ -z "${GEMINI_API_KEY:-}" && -f "${key_file}" ]]; then
+    chmod 600 "${key_file}" 2>/dev/null || true
+    IFS= read -r GEMINI_API_KEY <"${key_file}" || true
+fi
+
+if [[ -z "${GEMINI_API_KEY:-}" ]]; then
+    printf 'Error: GEMINI_API_KEY is not set\n' >&2
+    printf 'Please set GEMINI_API_KEY or save it in %s\n' "${key_file}" >&2
+    exit 3
+fi
+
+color_prefix=""
+color_reset=""
+
+if [[ -t 1 ]]; then
+    color_prefix=$'\033[1;36m'
+    color_reset=$'\033[0m'
+fi
+
+curl -fsS \
+    -H "x-goog-api-key: ${GEMINI_API_KEY}" \
+    "https://generativelanguage.googleapis.com/v1beta/models" |
+    jq -r --arg p "${color_prefix}" --arg r "${color_reset}" '
+        .models[]
+        | "\($p)\(.name | sub("^models/"; ""))\($r): \(.description // .displayName // "No description" | gsub("\n+"; " ") | gsub("^ +| +$"; ""))"
+    '

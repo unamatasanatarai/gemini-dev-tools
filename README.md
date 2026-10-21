@@ -15,8 +15,8 @@ A set of lightweight Bash utility scripts designed to automate Git commit messag
 
 - **Conventional Commits Enforcement**: Generates single-line messages (max 256 characters) with standardized scopes such as `feat`, `fix`, `refactor`, and `docs`.
 - **Automatic Noise Filtering**: Excludes standard dependency lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`) from the Git diff to optimize context tokens.
-- **Diff Context Management**: Automatically truncates Git diff inputs at 90,000 characters to prevent API request limits from being exceeded.
-- **Automated Workflows**: Includes helper scripts (`ggic` and `ggicp`) to stage all working directory changes, generate and display the AI-crafted message, and execute Git commits or remote pushes automatically.
+- **Diff Context Management**: Automatically truncates Git diff inputs at 100,000 characters to prevent API request limits from being exceeded.
+- **Automated Workflows**: Includes helper scripts (`ggic` and `ggicp`) to stage working directory changes, generate and display the AI-crafted message, and execute Git commits or remote pushes automatically.
 - **Model Listing**: Queries available model endpoints dynamically using the API key to view available language model configurations.
 
 ---
@@ -34,9 +34,9 @@ A set of lightweight Bash utility scripts designed to automate Git commit messag
 
 ```text
 gemini-generate-commit-message   Core script containing diff parsing, token limiting, API payload generation, and response formatting.
-gemini-show-models               Utility script that queries and lists available models from the Gemini API.
-ggic                             Wrapper script that runs 'git add --all', generates the commit message, and commits automatically.
-ggicp                            Wrapper script that runs 'git add --all', generates the commit message, commits automatically, and pushes to origin.
+gemini-list-models               Utility script that queries and lists available models from the Gemini API.
+ggic                             Wrapper script that stages changes, generates the commit message, and commits.
+ggicp                            Wrapper script that stages changes, generates the commit message, commits, and pushes to origin.
 install.sh                       Download and installation script to place utilities into local bin directories and check PATH settings.
 LICENSE                          MIT License declaration.
 ```
@@ -79,20 +79,28 @@ You must provide a Gemini API key using one of the following methods:
    ```bash
    export GEMINI_API_KEY="your_api_key_here"
    ```
-2. **Plaintext File**: Save the key in `$XDG_CONFIG_HOME/gemini-commit-message/key` (which defaults to `~/.config/gemini-commit-message/key`).
+2. **Plaintext File**: Save the key in `$XDG_CONFIG_HOME/gemini-commit-message/key` (which defaults to `~/.config/gemini-commit-message/key`):
+   ```bash
+   mkdir -p ~/.config/gemini-commit-message
+   chmod 700 ~/.config/gemini-commit-message
+   echo "your_api_key_here" > ~/.config/gemini-commit-message/key
+   chmod 600 ~/.config/gemini-commit-message/key
+   ```
 
 ### Model Customization
 
-By default, the script calls `gemini-3.1-flash-lite`. You can customize the model by exporting the following environment variable:
+By default, the script calls `gemini-3.5-flash-lite`. You can customize the model by exporting the following environment variable:
 
 ```bash
+export GEMINI_SUMMARY_MODEL="alternative-model-name"
+# or
 export GIT_SUMMARY_MODEL="alternative-model-name"
 ```
 
 To list out all available models for your API key, execute:
 
 ```bash
-gemini-show-models
+gemini-list-models
 ```
 
 ---
@@ -101,15 +109,19 @@ gemini-show-models
 
 ### Automated Stage and Commit
 
-Automatically stages all changes, displays the generated message, and creates the commit:
+Stages changes, displays the generated message, and creates the commit:
 
 ```bash
 ggic
 ```
 
+Options:
+- `--staged-only`: Only commit changes that are already staged; do not stage unstaged files with `git add --all`.
+- `--push`: Push to the current branch on origin after committing.
+
 ### Automated Stage, Commit, and Push
 
-Stages all changes, creates a commit using the generated message, and pushes to the current branch on the remote:
+Stages changes, creates a commit using the generated message, and pushes to origin:
 
 ```bash
 ggicp
@@ -117,7 +129,7 @@ ggicp
 
 ### Direct Message Output
 
-Generates and prints a raw commit message to stdout based on currently staged changes without executing a commit:
+Generates and prints a raw commit message to stdout based on staged changes (or working tree changes if nothing is staged) without executing a commit:
 
 ```bash
 gemini-generate-commit-message

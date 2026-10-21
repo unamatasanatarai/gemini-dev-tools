@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 install_dir="${XDG_BIN_HOME:-${HOME}/.local/bin}"
 base_url="https://raw.githubusercontent.com/unamatasanatarai/gemini-generate-commit-message/master"
 
-files=("ggic" "ggicp" "gemini-generate-commit-message" "gemini-show-models")
+files=("ggic" "ggicp" "gemini-generate-commit-message" "gemini-list-models")
 
 if ! command -v curl >/dev/null 2>&1; then
     printf '%s\n' 'curl is required' >&2
@@ -20,14 +21,18 @@ mkdir -p "$config_dir" || {
     printf '%s\n' 'failed to create config directory' >&2
     exit 1
 }
+chmod 700 "$config_dir"
+
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/gemini-install.XXXXXX")"
+trap 'rm -rf "${tmp_dir}"' EXIT INT TERM HUP
+chmod 700 "${tmp_dir}"
 
 for file in "${files[@]}"; do
     target="${install_dir}/${file}"
     script_url="${base_url}/${file}"
+    tmp_file="${tmp_dir}/${file}"
 
     printf 'installing %s...\n' "$file"
-
-    tmp_file="$(mktemp "${TMPDIR:-/tmp}/license-install-${file}.$$")"
 
     curl \
         --silent \
@@ -39,20 +44,12 @@ for file in "${files[@]}"; do
         --output "$tmp_file" \
         "$script_url"
 
-    status="$?"
-    if [ "$status" -ne 0 ]; then
-        rm -f "$tmp_file"
-        printf 'failed to download %s\n' "$file" >&2
-        exit 1
-    fi
-
-    if [ ! -s "$tmp_file" ]; then
-        rm -f "$tmp_file"
+    if [[ ! -s "$tmp_file" ]]; then
         printf '%s\n' "downloaded file ${file} is empty" >&2
         exit 1
     fi
 
-    chmod +x "$tmp_file"
+    chmod 755 "$tmp_file"
     mv "$tmp_file" "$target"
 done
 
@@ -70,8 +67,10 @@ printf '\n%s\n' 'usage:'
 printf '%s\n' '  ggic'
 printf '%s\n' '  ggicp'
 printf '%s\n' '  gemini-generate-commit-message'
-printf '%s\n' '  gemini-show-models'
+printf '%s\n' '  gemini-list-models'
 
 printf '\n%s\n' 'configuration:'
 printf '  please paste your gemini api key into:\n'
 printf '    %s\n' "${config_dir}/key"
+printf '  and ensure secure permissions:\n'
+printf '    chmod 600 %s\n' "${config_dir}/key"

@@ -1,26 +1,21 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
 push_after_commit=false
-status=0
+staged_only=false
 current_branch=""
 line=""
 message=""
 
 script_path="${BASH_SOURCE[0]}"
-script_dir="."
+script_dir="$(cd -- "$(dirname -- "${script_path}")" >/dev/null 2>&1 && pwd -P)"
 generator="gemini-generate-commit-message"
 
-XDG_DATA_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}"
-state_dir="${XDG_DATA_HOME}/gemini-commit-message"
-message_file="${state_dir}/message.$$.tmp"
-
-if [[ "${script_path}" == */* ]]; then
-    script_dir="${script_path%/*}"
-fi
-
-if [[ -x "${script_dir}/${generator}" ]]; then
+if [[ -n "${script_dir}" && -x "${script_dir}/${generator}" ]]; then
     generator="${script_dir}/${generator}"
-elif ! command -v "${generator}" >/dev/null 2>&1; then
+elif command -v "${generator}" >/dev/null 2>&1; then
+    generator="$(command -v "${generator}")"
+else
     printf 'Error: generator command not found: %s\n' "${generator}" >&2
     exit 11
 fi
@@ -30,8 +25,15 @@ while [[ $# -gt 0 ]]; do
     --push)
         push_after_commit=true
         ;;
+    --staged-only)
+        staged_only=true
+        ;;
+    -h | --help)
+        printf 'Usage: %s [--push] [--staged-only]\n' "${0##*/}"
+        exit 0
+        ;;
     *)
-        printf 'Usage: %s [--push]\n' "${0##*/}" >&2
+        printf 'Usage: %s [--push] [--staged-only]\n' "${0##*/}" >&2
         exit 2
         ;;
     esac
@@ -43,69 +45,42 @@ if ! command -v git >/dev/null 2>&1; then
     exit 12
 fi
 
-mkdir -p "${state_dir}"
-status=$?
-if [[ ${status} -ne 0 ]]; then
-    printf 'Error: failed to create state directory: %s\n' "${state_dir}" >&2
-    exit 3
-fi
-
-git rev-parse --git-dir >/dev/null 2>&1
-status=$?
-if [[ ${status} -ne 0 ]]; then
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
     printf 'Error: not inside a git repository\n' >&2
-    rm -f "${message_file}"
     exit 4
 fi
 
+tmp_dir="$(mktemp -d -t ggic.XXXXXX)"
+trap 'rm -rf "${tmp_dir}"' EXIT INT TERM HUP
+chmod 700 "${tmp_dir}"
+
+message_file="${tmp_dir}/message.txt"
+branch_file="${tmp_dir}/branch.txt"
+
 if [[ "${push_after_commit}" == true ]]; then
-    git symbolic-ref --quiet --short HEAD >"${message_file}"
-    status=$?
-    if [[ ${status} -ne 0 ]]; then
+    if ! git symbolic-ref --quiet --short HEAD >"${branch_file}"; then
         printf 'Error: cannot push from a detached HEAD\n' >&2
-        rm -f "${message_file}"
         exit 5
     fi
 
-    IFS= read -r current_branch <"${message_file}"
+    IFS= read -r current_branch <"${branch_file}" || true
 
     if [[ -z "${current_branch}" ]]; then
         printf 'Error: cannot push from a detached HEAD\n' >&2
-        rm -f "${message_file}"
         exit 5
     fi
 fi
 
-git add --all
-status=$?
-if [[ ${status} -ne 0 ]]; then
-    printf 'Error: failed to stage changes\n' >&2
-    rm -f "${message_file}"
-    exit 6
+if [[ "${staged_only}" == false ]]; then
+    git add --all
 fi
 
-git diff --cached --quiet
-status=$?
-
-if [[ ${status} -eq 0 ]]; then
+if git diff --cached --quiet; then
     printf 'No changes to commit.\n'
-    rm -f "${message_file}"
     exit 0
 fi
 
-if [[ ${status} -ne 1 ]]; then
-    printf 'Error: failed to inspect staged changes\n' >&2
-    rm -f "${message_file}"
-    exit 7
-fi
-
 "${generator}" >"${message_file}"
-status=$?
-
-if [[ ${status} -ne 0 ]]; then
-    rm -f "${message_file}"
-    exit "${status}"
-fi
 
 while IFS= read -r line || [[ -n "${line}" ]]; do
     message+="${line}"$'\n'
@@ -116,7 +91,6 @@ message="${message%"${message##*[![:space:]]*}"}"
 
 if [[ -z "${message}" ]]; then
     printf 'Error: generated commit message is empty\n' >&2
-    rm -f "${message_file}"
     exit 8
 fi
 
@@ -125,22 +99,8 @@ printf '%s\n' '-------------------------'
 printf '%s\n' "${message}"
 printf '%s\n' '-------------------------'
 
-git commit -m "${message}"
-status=$?
-if [[ ${status} -ne 0 ]]; then
-    printf 'Error: git commit failed\n' >&2
-    rm -f "${message_file}"
-    exit 9
-fi
+git commit -F "${message_file}" --
 
 if [[ "${push_after_commit}" == true ]]; then
-    git push -u origin "${current_branch}"
-    status=$?
-    if [[ ${status} -ne 0 ]]; then
-        printf 'Error: git push failed\n' >&2
-        rm -f "${message_file}"
-        exit 10
-    fi
+    git push -u origin -- "${current_branch}"
 fi
-
-rm -f "${message_file}"
