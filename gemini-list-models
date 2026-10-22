@@ -22,18 +22,7 @@ if [[ -z "${GEMINI_API_KEY:-}" ]]; then
     exit 3
 fi
 
-color_prefix=""
-color_reset=""
-
-if [[ -t 1 ]]; then
-    color_prefix=$'\033[1;36m'
-    color_reset=$'\033[0m'
-fi
-
 curl -fsS \
     -H "x-goog-api-key: ${GEMINI_API_KEY}" \
     "https://generativelanguage.googleapis.com/v1beta/models" |
-    jq -r --arg p "${color_prefix}" --arg r "${color_reset}" '
-        .models[]
-        | "\($p)\(.name | sub("^models/"; ""))\($r): \(.description // .displayName // "No description" | gsub("\n+"; " ") | gsub("^ +| +$"; ""))"
-    '
+    jq -r '[.models[].name | sub("^models/"; "")] | sort[]'

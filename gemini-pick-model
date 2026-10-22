@@ -26,12 +26,10 @@ if [[ -z "${raw_models}" ]]; then
 fi
 
 models=()
-descriptions=()
 
 while IFS= read -r line || [[ -n "${line}" ]]; do
-    if [[ "${line}" =~ ^([^:]+):[[:space:]]*(.*)$ ]]; then
-        models+=("${BASH_REMATCH[1]}")
-        descriptions+=("${BASH_REMATCH[2]}")
+    if [[ -n "${line}" ]]; then
+        models+=("${line}")
     fi
 done <<<"${raw_models}"
 
@@ -51,14 +49,12 @@ fi
 cyan=""
 bold=""
 green=""
-dim=""
 reset=""
 
 if [[ -t 1 ]]; then
     cyan=$'\033[36m'
     bold=$'\033[1m'
     green=$'\033[32m'
-    dim=$'\033[2m'
     reset=$'\033[0m'
 fi
 
@@ -70,7 +66,7 @@ for i in "${!models[@]}"; do
     if [[ "${models[i]}" == "${current_model}" ]]; then
         marker="*"
     fi
-    printf "%s%3d)%s %s%-34s%s %s%s%s\n" "${bold}" "${num}" "${reset}" "${cyan}" "${models[i]}" "${reset}" "${dim}" "${descriptions[i]}" "${reset}"
+    printf "%s%3d)%s %s %s%s%s\n" "${bold}" "${num}" "${reset}" "${marker}" "${cyan}" "${models[i]}" "${reset}"
 done
 
 printf "\n"
@@ -81,9 +77,9 @@ if command -v fzf >/dev/null 2>&1 && [[ -t 0 && -t 1 ]]; then
     printf "%sSelect model (Enter number, name, or press Enter for interactive filter):%s " "${bold}" "${reset}"
     read -r choice || true
     if [[ -z "${choice}" ]]; then
-        fzf_choice=$(printf "%s\n" "${raw_models}" | fzf --prompt="Select model: " --height=40% --reverse)
+        fzf_choice=$(printf "%s\n" "${models[@]}" | fzf --prompt="Select model: " --height=40% --reverse)
         if [[ -n "${fzf_choice}" ]]; then
-            selected_model="${fzf_choice%%:*}"
+            selected_model="${fzf_choice}"
         fi
     fi
 else
