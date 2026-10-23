@@ -79,7 +79,10 @@ if [[ $? -ne 0 ]]; then
     printf 'Error: failed to create temporary directory: %s\n' "${tmp_dir}" >&2
     exit 1
 fi
-trap 'rm -rf "${tmp_dir}"' EXIT INT TERM HUP
+trap 'rm -rf "${tmp_dir}"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 message_file="${tmp_dir}/message.txt"
 

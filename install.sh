@@ -54,7 +54,10 @@ if [[ $? -ne 0 ]]; then
     exit 1
 fi
 
-trap 'rm -rf "${tmp_dir}"' EXIT INT TERM HUP
+trap 'rm -rf "${tmp_dir}"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 for file in "${files[@]}"; do
     printf 'installing %s...\n' "${file}"
