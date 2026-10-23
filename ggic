@@ -10,8 +10,16 @@ message=""
 
 script_path="${BASH_SOURCE[0]}"
 script_dir="$(cd -- "$(dirname -- "${script_path}")" >/dev/null 2>&1 && pwd -P)"
-generator="gemini-generate-commit-message"
 
+if [[ -f "${script_dir}/gemini-common.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${script_dir}/gemini-common.sh"
+elif [[ -f "${XDG_BIN_HOME:-$HOME/.local/bin}/gemini-common.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${XDG_BIN_HOME:-$HOME/.local/bin}/gemini-common.sh"
+fi
+
+generator="gemini-generate-commit-message"
 if [[ -n "${script_dir}" && -x "${script_dir}/${generator}" ]]; then
     generator="${script_dir}/${generator}"
 elif command -v "${generator}" >/dev/null 2>&1; then
@@ -90,104 +98,33 @@ if git diff --cached --quiet; then
     exit 0
 fi
 
-DEFAULT_MODELS=(
-    gemini-pro-latest
-    gemini-flash-lite-latest
-    gemini-flash-latest
-    gemini-4-argon
-    gemini-3.8-flash-tts
-    gemini-3.8-flash-lite-tts
-    gemini-3.8-flash
-    gemini-3.7-flash
-    gemini-3.6-flash
-    gemini-3.5-flash-lite
-    gemini-3.5-flash
-    gemini-3.1-flash-lite
-    gemini-2.5-pro
-    gemini-2.5-flash-lite
-    gemini-2.5-flash
-)
+generator_status=0
+if [[ -n "${cli_model}" ]]; then
+    "${generator}" --model "${cli_model}" >"${message_file}" || generator_status=$?
+else
+    "${generator}" >"${message_file}" || generator_status=$?
+fi
 
-resolve_initial_model() {
-    local config_home="${XDG_CONFIG_HOME:-$HOME/.config}"
-    local model_file="${config_home}/gemini-commit-message/model"
-    local saved_model=""
+if [[ ${generator_status} -eq 12 ]]; then
+    printf 'Error: GEMINI_API_KEY is not set or configured\n' >&2
+    exit 12
+fi
 
-    if [[ -n "${cli_model}" ]]; then
-        printf '%s\n' "${cli_model}"
-        return 0
-    fi
+if [[ ${generator_status} -ne 0 ]]; then
+    printf 'Error: commit message generator failed with status %d\n' "${generator_status}" >&2
+    exit "${generator_status}"
+fi
 
-    if [[ -f "${model_file}" ]]; then
-        IFS= read -r saved_model <"${model_file}" || true
-        if [[ -n "${saved_model}" ]]; then
-            printf '%s\n' "${saved_model}"
-            return 0
-        fi
-    fi
+message=""
+while IFS= read -r line || [[ -n "${line}" ]]; do
+    message+="${line}"$'\n'
+done <"${message_file}"
 
-    if [[ -n "${GEMINI_SUMMARY_MODEL:-}" ]]; then
-        printf '%s\n' "${GEMINI_SUMMARY_MODEL}"
-        return 0
-    fi
+message="${message#"${message%%[![:space:]]*}"}"
+message="${message%"${message##*[![:space:]]*}"}"
 
-    if [[ -n "${GIT_SUMMARY_MODEL:-}" ]]; then
-        printf '%s\n' "${GIT_SUMMARY_MODEL}"
-        return 0
-    fi
-
-    printf '%s\n' "gemini-3.5-flash-lite"
-}
-
-initial_model="$(resolve_initial_model)"
-models_to_try=("${initial_model}")
-for candidate in "${DEFAULT_MODELS[@]}"; do
-    if [[ "${candidate}" != "${initial_model}" ]]; then
-        models_to_try+=("${candidate}")
-    fi
-done
-
-success=false
-total_models="${#models_to_try[@]}"
-
-for i in "${!models_to_try[@]}"; do
-    current_model="${models_to_try[i]}"
-    generator_status=0
-
-    "${generator}" --model "${current_model}" >"${message_file}" || generator_status=$?
-
-    if [[ ${generator_status} -eq 12 ]]; then
-        printf 'Error: GEMINI_API_KEY is not set or configured\n' >&2
-        exit 12
-    fi
-
-    if [[ ${generator_status} -eq 0 ]]; then
-        message=""
-        while IFS= read -r line || [[ -n "${line}" ]]; do
-            message+="${line}"$'\n'
-        done <"${message_file}"
-
-        message="${message#"${message%%[![:space:]]*}"}"
-        message="${message%"${message##*[![:space:]]*}"}"
-
-        if [[ -n "${message}" ]]; then
-            success=true
-            break
-        fi
-    fi
-
-    if [[ $((i + 1)) -lt ${total_models} ]]; then
-        next_model="${models_to_try[$((i + 1))]}"
-        printf 'Warning: Model %s failed (exit %d). Trying fallback: %s...\n' \
-            "${current_model}" "${generator_status}" "${next_model}" >&2
-    else
-        printf 'Warning: Model %s failed (exit %d).\n' \
-            "${current_model}" "${generator_status}" >&2
-    fi
-done
-
-if [[ "${success}" == false ]]; then
-    printf 'Error: all candidate models failed to generate a commit message\n' >&2
+if [[ -z "${message}" ]]; then
+    printf 'Error: generated commit message was empty\n' >&2
     exit 8
 fi
 

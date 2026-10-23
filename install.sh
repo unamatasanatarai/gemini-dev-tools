@@ -4,7 +4,16 @@ set -euo pipefail
 install_dir="${XDG_BIN_HOME:-${HOME}/.local/bin}"
 base_url="https://raw.githubusercontent.com/unamatasanatarai/gemini-generate-commit-message/master"
 
-files=("ggic" "ggicp" "gemini-generate-commit-message" "gemini-list-models" "gemini-pick-model")
+files=(
+    "gemini-common.sh"
+    "gemini-key"
+    "gemini-list-models"
+    "gemini-pick-model"
+    "gemini-rotate-models"
+    "gemini-generate-commit-message"
+    "ggic"
+    "ggicp"
+)
 
 if ! command -v curl >/dev/null 2>&1; then
     printf '%s\n' 'curl is required' >&2
@@ -16,7 +25,7 @@ mkdir -p "$install_dir" || {
     exit 1
 }
 
-config_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/gemini-commit-message"
+config_dir="${XDG_CONFIG_HOME:-${HOME}/.config}/gemini"
 mkdir -p "$config_dir" || {
     printf '%s\n' 'failed to create config directory' >&2
     exit 1
@@ -63,15 +72,19 @@ case ":$PATH:" in
     ;;
 esac
 
-printf '\n%s\n' 'usage:'
-printf '%s\n' '  ggic'
-printf '%s\n' '  ggicp'
-printf '%s\n' '  gemini-generate-commit-message'
-printf '%s\n' '  gemini-list-models'
-printf '%s\n' '  gemini-pick-model'
+printf '\n%s\n' 'suite utilities:'
+printf '%s\n' '  gemini-key             - Manage Gemini API key credentials'
+printf '%s\n' '  gemini-rotate-models   - Select & order rotation fallback models (newest to oldest)'
+printf '%s\n' '  gemini-pick-model      - Set default primary model'
+printf '%s\n' '  gemini-list-models     - List available models from API'
+printf '%s\n' '  gemini-generate-commit-message - Generate commit message from diff'
+printf '%s\n' '  ggic                   - Auto-stage, fallback-rotate models, and commit'
+printf '%s\n' '  ggicp                  - Auto-stage, fallback-rotate models, commit, and push'
 
-printf '\n%s\n' 'configuration:'
-printf '  please paste your gemini api key into:\n'
-printf '    %s\n' "${config_dir}/key"
-printf '  and ensure secure permissions:\n'
-printf '    chmod 600 %s\n' "${config_dir}/key"
+printf '\n%s\n' 'quick start:'
+printf '%s\n' '  1. Store your API key:'
+printf '%s\n' '     gemini-key set'
+printf '%s\n' '  2. Configure model rotation (optional):'
+printf '%s\n' '     gemini-rotate-models'
+printf '%s\n' '  3. Generate and commit:'
+printf '%s\n' '     ggic'

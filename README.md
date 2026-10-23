@@ -1,4 +1,4 @@
-# gemini-generate-commit-message
+# gemini-tooling
 
 ![Language](https://img.shields.io/badge/language-bash-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -7,17 +7,18 @@
 ![Platform](https://img.shields.io/badge/platform-POSIX-brightgreen)
 ![API](https://img.shields.io/badge/API-Gemini-red)
 
-A set of lightweight Bash utility scripts designed to automate Git commit message generation using the Google Gemini API. The utility analyzes staged changes, filters out common noise files, and interacts with the Gemini API to construct structured, concise commit messages following Conventional Commits guidelines.
+A cohesive collection of lightweight, POSIX-compliant Bash utilities powered by the Google Gemini API. The suite provides secure API key management, dynamic model listing and fallback rotation (strictly ordered newest to oldest), automated Git commit message generation with Conventional Commits, and automated Git staging/push workflows.
 
 ---
 
 ## Features
 
-- **Conventional Commits Enforcement**: Generates single-line messages (max 256 characters) with standardized scopes such as `feat`, `fix`, `refactor`, and `docs`.
-- **Automatic Noise Filtering**: Excludes standard dependency lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`) from the Git diff to optimize context tokens.
-- **Diff Context Management**: Automatically truncates Git diff inputs at 100,000 characters to prevent API request limits from being exceeded.
-- **Automated Workflows**: Includes helper scripts (`ggic` and `ggicp`) to stage working directory changes, generate and display the AI-crafted message, and execute Git commits or remote pushes automatically.
-- **Model Listing**: Queries available model endpoints dynamically using the API key to view available language model configurations.
+- **Cohesive XDG Standard**: All tools unify configuration and credentials under `${XDG_CONFIG_HOME:-~/.config}/gemini/`.
+- **Credential Vault (`gemini-key`)**: Safely store, inspect, verify, and export your Gemini API key with strict `0600` file permissions.
+- **Ordered Fallback Rotation (`gemini-rotate-models`)**: Interactively choose which models to rotate through for resilience against rate limits or outages, automatically enforced from **newest to oldest**.
+- **Conventional Commits Generation**: Analyzes staged diffs, filters noisy dependency lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`), and crafts structured commit messages.
+- **Automated Git Workflows (`ggic` & `ggicp`)**: Stages working tree changes, executes the model rotation sequence with automatic fallback on failure, and creates commits (and pushes to remote with `ggicp`).
+- **Interactive Model Selection (`gemini-pick-model`)**: Easily pick and persist your primary preferred model using `fzf` or clean terminal menus.
 
 ---
 
@@ -26,27 +27,29 @@ A set of lightweight Bash utility scripts designed to automate Git commit messag
 - **Core Scripting**: Bash
 - **Data Querying & Parsing**: `curl`, `jq`
 - **Version Control**: Git
-- **API Integration**: Google Gemini API (v1beta endpoint)
+- **API Integration**: Google Gemini API (`v1beta` endpoint)
+- **Interactive Menus**: `fzf` (optional, with native CLI fallbacks)
 
 ---
 
 ## Project Structure
 
 ```text
-gemini-generate-commit-message   Core script containing diff parsing, token limiting, API payload generation, and response formatting.
-gemini-list-models               Utility script that queries and lists available models from the Gemini API.
-gemini-pick-model                Interactive utility to choose and save the default model to configuration.
-ggic                             Wrapper script that stages changes, generates the commit message, and commits.
-ggicp                            Wrapper script that stages changes, generates the commit message, commits, and pushes to origin.
-install.sh                       Download and installation script to place utilities into local bin directories and check PATH settings.
+gemini-common.sh                 Shared library for XDG path resolution, key handling, and model sorting.
+gemini-key                       CLI vault to store, inspect, and supply API keys in ~/.config/gemini/credentials.
+gemini-rotate-models             Interactive selector to manage model rotation lists ordered newest to oldest.
+gemini-pick-model                Interactive utility to pick and save primary default model.
+gemini-list-models               Queries and filters models from the Gemini API.
+gemini-generate-commit-message   Core commit message generator analyzing Git diffs.
+ggic                             Automated workflow: stage all, fallback-rotate models, and commit.
+ggicp                            Automated workflow: stage all, fallback-rotate models, commit, and push.
+install.sh                       Download and installation script to place utilities into ~/.local/bin.
 LICENSE                          MIT License declaration.
 ```
 
 ---
 
 ## Installation
-
-An automated installation script is provided to download and configure the tools in your user bin directory.
 
 ### Standard Installation
 
@@ -56,11 +59,11 @@ Execute the installation script using `curl`:
 curl -sSL https://raw.githubusercontent.com/unamatasanatarai/gemini-generate-commit-message/master/install.sh | bash
 ```
 
-This downloads and configures the binaries inside your `$XDG_BIN_HOME` or `$HOME/.local/bin` folder.
+This installs the utilities into `$XDG_BIN_HOME` or `$HOME/.local/bin` and initializes `~/.config/gemini/`.
 
-### Environment Path Configuration
+### Shell PATH Configuration
 
-If your local bin directory is not listed in your shell profile, add the path manually:
+Ensure your user bin directory is in your shell profile (`~/.bashrc`, `~/.zshrc`, etc.):
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -68,43 +71,63 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ---
 
-## Configuration
+## Configuration & Credentials
 
-The utility relies on the XDG Base Directory Specification for config and temporary storage.
+All tools respect the XDG Base Directory Specification:
 
-### Authentication
+| File | Purpose | Permissions |
+| :--- | :--- | :--- |
+| `~/.config/gemini/credentials` | Stored Gemini API key | `0600` (user only) |
+| `~/.config/gemini/model` | Default primary model | `0644` |
+| `~/.config/gemini/rotation` | Ordered fallback models (newest -> oldest) | `0644` |
 
-You must provide a Gemini API key using one of the following methods:
+### 1. Configure API Key
 
-1. **Environment Variable**: Export the key directly into your shell profile:
-   ```bash
-   export GEMINI_API_KEY="your_api_key_here"
-   ```
-2. **Plaintext File**: Save the key in `$XDG_CONFIG_HOME/gemini-commit-message/key` (which defaults to `~/.config/gemini-commit-message/key`):
-   ```bash
-   mkdir -p ~/.config/gemini-commit-message
-   chmod 700 ~/.config/gemini-commit-message
-   echo "your_api_key_here" > ~/.config/gemini-commit-message/key
-   chmod 600 ~/.config/gemini-commit-message/key
-   ```
-
-### Model Customization
-
-By default, the script calls `gemini-3.5-flash-lite`. You can customize the model by exporting the following environment variable:
+Use `gemini-key` to securely store your API key:
 
 ```bash
-export GEMINI_SUMMARY_MODEL="alternative-model-name"
-# or
-export GIT_SUMMARY_MODEL="alternative-model-name"
+gemini-key set
 ```
 
-To list out all available models for your API key, execute:
+Or pass via pipe:
 
 ```bash
-gemini-list-models
+echo "$MY_KEY" | gemini-key set
 ```
 
-To interactively pick and persist a new default model in your configuration:
+Check the health and permissions of your stored credentials anytime:
+
+```bash
+gemini-key status
+```
+
+### 2. Configure Model Rotation (Newest to Oldest)
+
+To choose which models you want `ggic` to rotate through on rate-limit or API failures:
+
+```bash
+gemini-rotate-models
+```
+
+- Launches an interactive `fzf` multi-selector (or numbered CLI menu).
+- Press `TAB` to toggle models; press `Enter` to confirm.
+- Models are **automatically saved strictly from newest to oldest** in `~/.config/gemini/rotation`.
+
+Display current rotation order:
+
+```bash
+gemini-rotate-models --show
+```
+
+Reset to curated defaults:
+
+```bash
+gemini-rotate-models --reset
+```
+
+### 3. Set Primary Default Model
+
+To change the primary model used for single-run commands:
 
 ```bash
 gemini-pick-model
@@ -114,32 +137,42 @@ gemini-pick-model
 
 ## Usage
 
-### Automated Stage and Commit
+### Automated Stage, Rotate, and Commit (`ggic`)
 
-Stages changes, displays the generated message, and creates the commit:
+Stages working directory changes, runs the rotation fallback sequence if a model is unavailable or rate-limited, and commits:
 
 ```bash
 ggic
 ```
 
 Options:
-- `--staged-only`: Only commit changes that are already staged; do not stage unstaged files with `git add --all`.
-- `--push`: Push to the current branch on origin after committing.
+- `--staged-only`: Only commit changes already in the Git staging index.
+- `--model <name>`: Override and try a specific model first before falling back to rotation.
+- `--push`: Push to upstream branch after committing.
 
-### Automated Stage, Commit, and Push
+### Automated Stage, Commit, and Push (`ggicp`)
 
-Stages changes, creates a commit using the generated message, and pushes to origin:
+Shortcut that stages all changes, generates the commit message with fallback rotation, commits, and pushes to origin:
 
 ```bash
 ggicp
 ```
 
-### Direct Message Output
+### Direct Message Output (`gemini-generate-commit-message`)
 
-Generates and prints a raw commit message to stdout based on staged changes (or working tree changes if nothing is staged) without executing a commit:
+Prints the generated Conventional Commit message directly to stdout without committing:
 
 ```bash
 gemini-generate-commit-message
+```
+
+### List Models (`gemini-list-models`)
+
+List models available to your API key:
+
+```bash
+# List only text/chat generation models, sorted newest to oldest:
+gemini-list-models --generate-only --newest
 ```
 
 ---

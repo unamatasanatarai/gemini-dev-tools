@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+
+usage() {
+    printf 'Usage: gemini-key <command> [arguments...]\n'
+    printf '\n'
+    printf 'Securely store and supply Google Gemini API keys in an XDG-compliant location\n'
+    printf '(~/.config/gemini/credentials) for command-line tools without manual exports.\n'
+    printf '\n'
+    printf 'Commands:\n'
+    printf '  set [KEY]                 Store key (prompts silently if KEY is omitted)\n'
+    printf '  get                       Print raw key to stdout (for piping or script usage)\n'
+    printf '  run [--] <cmd> [args...]  Execute command with GEMINI_API_KEY and GOOGLE_API_KEY in memory\n'
+    printf "  env                       Output shell export statements for 'eval \"\$(gemini-key env)\"'\n"
+    printf '  status                    Check storage path, file existence, and permissions\n'
+    printf '  help, -h, --help          Show this help message\n'
+    printf '\n'
+    printf 'Examples:\n'
+    printf '  gemini-key set\n'
+    printf '  echo "$MY_KEY" | gemini-key set\n'
+    printf '  gemini-key run -- gemini prompt "Hello world"\n'
+    printf '  gemini-key run -- python my_script.py\n'
+    printf '  eval "$(gemini-key env)"\n'
+    printf '  curl -H "x-goog-api-key: $(gemini-key get)" https://...\n'
+}
+
+_gemini_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/gemini"
+_gemini_cred_file="${_gemini_config_dir}/credentials"
+
+_cmd="${1:-}"
+[[ -n "$_cmd" ]] && shift
+
+case "$_cmd" in
+
+set)
+    _key=""
+    if [[ $# -gt 0 ]] && [[ -n "$1" ]]; then
+        _key="$1"
+    elif [[ ! -t 0 ]]; then
+        IFS= read -r _key || true
+    else
+        printf 'Enter Gemini API Key: ' >&2
+        stty -echo 2>/dev/null || true
+        IFS= read -r _key || true
+        stty echo 2>/dev/null || true
+        printf '\n' >&2
+    fi
+
+    _key="${_key%"${_key##*[![:space:]]}"}"
+    _key="${_key#"${_key%%[![:space:]]*}"}"
+    _key="${_key//$'\r'/}"
+    _key="${_key//$'\n'/}"
+
+    if [[ -z "$_key" ]]; then
+        printf 'Error: API key cannot be empty.\n' >&2
+        exit 1
+    fi
+
+    mkdir -m 0700 -p "$_gemini_config_dir"
+    chmod 0700 "$_gemini_config_dir"
+
+    printf '%s\n' "$_key" >"$_gemini_cred_file"
+    chmod 0600 "$_gemini_cred_file"
+
+    printf 'Gemini API key stored successfully in %s\n' "$_gemini_cred_file" >&2
+    ;;
+
+get)
+    if [[ ! -f "$_gemini_cred_file" ]]; then
+        printf 'Error: No Gemini API key found in %s\n' "$_gemini_cred_file" >&2
+        printf "Run 'gemini-key set' to configure your key.\n" >&2
+        exit 1
+    fi
+
+    IFS= read -r _key <"$_gemini_cred_file" || true
+    _key="${_key%"${_key##*[![:space:]]}"}"
+    _key="${_key#"${_key%%[![:space:]]*}"}"
+    _key="${_key//$'\r'/}"
+    _key="${_key//$'\n'/}"
+
+    if [[ -z "$_key" ]]; then
+        printf 'Error: Credentials file %s is empty.\n' "$_gemini_cred_file" >&2
+        printf "Run 'gemini-key set' to reconfigure your key.\n" >&2
+        exit 1
+    fi
+
+    printf '%s' "$_key"
+    ;;
+
+status)
+    printf 'XDG Config Directory : %s\n' "$_gemini_config_dir"
+    printf 'Credentials File     : %s\n' "$_gemini_cred_file"
+
+    if [[ -f "$_gemini_cred_file" ]]; then
+        _perms="unknown"
+        if stat -f '%Lp' "$_gemini_cred_file" >/dev/null 2>&1; then
+            _perms="$(stat -f '%Lp' "$_gemini_cred_file")"
+        elif stat -c '%a' "$_gemini_cred_file" >/dev/null 2>&1; then
+            _perms="$(stat -c '%a' "$_gemini_cred_file")"
+        fi
+
+        IFS= read -r _key <"$_gemini_cred_file" || true
+        _key="${_key//$'\r'/}"
+        _key="${_key//$'\n'/}"
+        _key_len="${#_key}"
+
+        if ((_key_len > 8)); then
+            _masked="${_key:0:4}...${_key: -4}"
+        elif ((_key_len > 0)); then
+            _masked="***"
+        else
+            _masked="(empty)"
+        fi
+
+        printf 'File Status          : Present (mode: %s)\n' "$_perms"
+        printf 'Key Configured       : %s (length: %d chars)\n' "$_masked" "$_key_len"
+
+        if [[ "$_perms" != "600" ]] && [[ "$_perms" != "unknown" ]]; then
+            printf '\n[WARNING] Permissions (%s) are looser than recommended 0600.\n' "$_perms" >&2
+            printf 'Run '\''chmod 0600 "%s"'\'' to secure your key file.\n' "$_gemini_cred_file" >&2
+        else
+            printf 'Security Check       : PASSED (restricted to owner)\n'
+        fi
+    else
+        printf 'File Status          : Not found\n'
+        printf "Key Configured       : No (run 'gemini-key set' to add a key)\n"
+    fi
+    ;;
+
+env)
+    if [[ ! -f "$_gemini_cred_file" ]]; then
+        printf 'Error: No Gemini API key found in %s\n' "$_gemini_cred_file" >&2
+        printf "Run 'gemini-key set' to configure your key.\n" >&2
+        exit 1
+    fi
+
+    IFS= read -r _key <"$_gemini_cred_file" || true
+    _key="${_key%"${_key##*[![:space:]]}"}"
+    _key="${_key#"${_key%%[![:space:]]*}"}"
+    _key="${_key//$'\r'/}"
+    _key="${_key//$'\n'/}"
+
+    if [[ -z "$_key" ]]; then
+        printf 'Error: Credentials file %s is empty.\n' "$_gemini_cred_file" >&2
+        printf "Run 'gemini-key set' to reconfigure your key.\n" >&2
+        exit 1
+    fi
+
+    _escaped="${_key//\'/\'\\\'\'}"
+    printf "export GEMINI_API_KEY='%s'\n" "$_escaped"
+    printf "export GOOGLE_API_KEY='%s'\n" "$_escaped"
+    ;;
+
+run)
+    [[ "${1:-}" == "--" ]] && shift
+
+    if [[ $# -eq 0 ]]; then
+        printf 'Error: No command specified to run.\n' >&2
+        printf 'Usage: gemini-key run [--] <command> [args...]\n' >&2
+        exit 1
+    fi
+
+    if [[ ! -f "$_gemini_cred_file" ]]; then
+        printf 'Error: No Gemini API key found in %s\n' "$_gemini_cred_file" >&2
+        printf "Run 'gemini-key set' to configure your key.\n" >&2
+        exit 1
+    fi
+
+    IFS= read -r _key <"$_gemini_cred_file" || true
+    _key="${_key%"${_key##*[![:space:]]}"}"
+    _key="${_key#"${_key%%[![:space:]]*}"}"
+    _key="${_key//$'\r'/}"
+    _key="${_key//$'\n'/}"
+
+    if [[ -z "$_key" ]]; then
+        printf 'Error: Credentials file %s is empty.\n' "$_gemini_cred_file" >&2
+        printf "Run 'gemini-key set' to reconfigure your key.\n" >&2
+        exit 1
+    fi
+
+    export GEMINI_API_KEY="$_key"
+    export GOOGLE_API_KEY="$_key"
+    exec "$@"
+    ;;
+
+help | -h | --help)
+    usage
+    ;;
+
+"")
+    usage
+    ;;
+
+*)
+    printf "Error: Unknown command '%s'\n\n" "$_cmd" >&2
+    usage >&2
+    exit 1
+    ;;
+
+esac

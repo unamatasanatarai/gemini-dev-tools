@@ -1,28 +1,90 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-key_file="${XDG_CONFIG_HOME}/gemini-commit-message/key"
+script_path="${BASH_SOURCE[0]}"
+script_dir="$(cd -- "$(dirname -- "${script_path}")" >/dev/null 2>&1 && pwd -P)"
+
+if [[ -f "${script_dir}/gemini-common.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${script_dir}/gemini-common.sh"
+elif [[ -f "${XDG_BIN_HOME:-$HOME/.local/bin}/gemini-common.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "${XDG_BIN_HOME:-$HOME/.local/bin}/gemini-common.sh"
+fi
+
+usage() {
+    cat <<EOF
+Usage: ${0##*/} [options]
+
+List available Gemini models for your API key.
+
+Options:
+  --generate-only   Only list models supporting generateContent (text/code/chat)
+  --newest          Sort models from newest to oldest
+  -h, --help        Show this help message
+EOF
+}
+
+generate_only=false
+sort_newest=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --generate-only)
+        generate_only=true
+        ;;
+    --newest)
+        sort_newest=true
+        ;;
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    *)
+        printf 'Error: unknown option: %s\n' "$1" >&2
+        usage >&2
+        exit 2
+        ;;
+    esac
+    shift
+done
 
 for dep in curl jq; do
     if ! command -v "${dep}" >/dev/null 2>&1; then
-        printf "Error: missing dependency: %s\n" "${dep}" >&2
+        printf 'Error: missing dependency: %s\n' "${dep}" >&2
         exit 1
     fi
 done
 
-if [[ -z "${GEMINI_API_KEY:-}" && -f "${key_file}" ]]; then
-    chmod 600 "${key_file}" 2>/dev/null || true
-    IFS= read -r GEMINI_API_KEY <"${key_file}" || true
-fi
-
-if [[ -z "${GEMINI_API_KEY:-}" ]]; then
-    printf 'Error: GEMINI_API_KEY is not set\n' >&2
-    printf 'Please set GEMINI_API_KEY or save it in %s\n' "${key_file}" >&2
+api_key=""
+if ! api_key="$(gemini_get_api_key 2>/dev/null)" || [[ -z "${api_key}" ]]; then
+    printf 'Error: GEMINI_API_KEY is not set or configured\n' >&2
+    printf 'Run '\''gemini-key set'\'' or set GEMINI_API_KEY environment variable.\n' >&2
     exit 3
 fi
 
-curl -fsS \
-    -H "x-goog-api-key: ${GEMINI_API_KEY}" \
-    "https://generativelanguage.googleapis.com/v1beta/models" |
-    jq -r '[.models[].name | sub("^models/"; "")] | sort[]'
+raw_json="$(curl -fsS -H "x-goog-api-key: ${api_key}" "https://generativelanguage.googleapis.com/v1beta/models")"
+
+if [[ "${generate_only}" == true ]]; then
+    models="$(printf '%s\n' "${raw_json}" | jq -r '
+        .models[]
+        | select(.supportedGenerationMethods[]? == "generateContent")
+        | .name
+        | sub("^models/"; "")
+    ')"
+else
+    models="$(printf '%s\n' "${raw_json}" | jq -r '
+        .models[].name
+        | sub("^models/"; "")
+    ')"
+fi
+
+if [[ "${sort_newest}" == true ]]; then
+    if declare -F gemini_sort_models_newest_to_oldest >/dev/null 2>&1; then
+        printf '%s\n' "${models}" | gemini_sort_models_newest_to_oldest
+    else
+        printf '%s\n' "${models}" | sort -V -r
+    fi
+else
+    printf '%s\n' "${models}" | sort
+fi
