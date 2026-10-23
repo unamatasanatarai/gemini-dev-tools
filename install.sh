@@ -2,7 +2,6 @@
 
 install_dir="${XDG_BIN_HOME:-${HOME:-}/.local/bin}"
 config_dir="${XDG_CONFIG_HOME:-${HOME:-}/.config}/gemini"
-base_url="https://raw.githubusercontent.com/unamatasanatarai/gemini-dev-tools/master"
 
 files=(
     "gemini-common.sh"
@@ -21,6 +20,18 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
+release_tag=""
+latest_url="$(curl -sS -w "%{url_effective}" -o /dev/null -L --connect-timeout 10 --max-time 15 "https://github.com/unamatasanatarai/gemini-dev-tools/releases/latest" 2>/dev/null)"
+if [[ "${latest_url}" =~ /releases/tag/([^/]+)$ ]]; then
+    release_tag="${BASH_REMATCH[1]}"
+fi
+
+if [[ -z "${release_tag}" ]]; then
+    release_tag="master"
+fi
+
+base_url="https://raw.githubusercontent.com/unamatasanatarai/gemini-dev-tools/${release_tag}"
+
 if [[ ! -d "${install_dir}" ]]; then
     mkdir -p "${install_dir}"
     if [[ $? -ne 0 ]]; then
@@ -30,18 +41,13 @@ if [[ ! -d "${install_dir}" ]]; then
 fi
 
 if [[ ! -d "${config_dir}" ]]; then
-    mkdir -p "${config_dir}"
+    mkdir -m 0700 -p "${config_dir}"
     if [[ $? -ne 0 ]]; then
         printf 'Error: failed to create config directory: %s\n' "${config_dir}" >&2
         exit 1
     fi
 fi
-
-chmod 700 "${config_dir}"
-if [[ $? -ne 0 ]]; then
-    printf 'Error: failed to set permissions on config directory: %s\n' "${config_dir}" >&2
-    exit 1
-fi
+chmod 0700 "${config_dir}" 2>/dev/null
 
 tmp_dir="${install_dir}/.gemini-install-$$"
 if [[ -d "${tmp_dir}" ]]; then
@@ -98,27 +104,28 @@ for file in "${files[@]}"; do
     fi
 done
 
-printf '\ninstalled to: %s\n' "${install_dir}"
+printf '\ninstalled (%s) to: %s\n' "${release_tag}" "${install_dir}"
 
 if [[ ":${PATH:-}:" != *":${install_dir}:"* ]]; then
-    printf '\nadd this to your shell profile:\n'
-    printf 'export PATH="%s:$PATH"\n' "${install_dir}"
+    printf '\nadd this to your shell profile:\nexport PATH="%s:$PATH"\n' "${install_dir}"
 fi
 
-printf '\nsuite utilities:\n'
-printf '  gemini-key             - Manage Gemini API key credentials\n'
-printf '  gemini-rotate-models   - Select & order rotation fallback models (newest to oldest)\n'
-printf '  gemini-pick-model      - Set default primary model\n'
-printf '  gemini-list-models     - List available models from API\n'
-printf '  gemini-commit-message  - Generate commit message from diff\n'
-printf '  ggic                   - Auto-stage, fallback-rotate models, and commit\n'
-printf '  ggicp                  - Auto-stage, fallback-rotate models, commit, and push\n'
-printf '  grel                   - Automated release workflow with Gemini release notes (also git release)\n'
-
-printf '\nquick start:\n'
-printf '  1. Store your API key:\n'
-printf '     gemini-key set\n'
-printf '  2. Configure model rotation (optional):\n'
-printf '     gemini-rotate-models\n'
-printf '  3. Generate and commit:\n'
-printf '     ggic\n'
+printf '%s\n' \
+    '' \
+    'suite utilities:' \
+    '  gemini-key             - Manage Gemini API key credentials' \
+    '  gemini-rotate-models   - Select & order rotation fallback models (newest to oldest)' \
+    '  gemini-pick-model      - Set default primary model' \
+    '  gemini-list-models     - List available models from API' \
+    '  gemini-commit-message  - Generate commit message from diff' \
+    '  ggic                   - Auto-stage, fallback-rotate models, and commit' \
+    '  ggicp                  - Auto-stage, fallback-rotate models, commit, and push' \
+    '  grel                   - Automated release workflow with Gemini release notes (also git release)' \
+    '' \
+    'quick start:' \
+    '  1. Store your API key:' \
+    '     gemini-key set' \
+    '  2. Configure model rotation (optional):' \
+    '     gemini-rotate-models' \
+    '  3. Generate and commit:' \
+    '     ggic'

@@ -303,13 +303,10 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-commits_file="${tmp_dir}/commits.txt"
 prompt_file="${tmp_dir}/prompt.txt"
 request_file="${tmp_dir}/request.json"
 response_file="${tmp_dir}/response.json"
 release_notes_file="${tmp_dir}/release_notes.md"
-
-git log --reverse --stat --format="Commit: %h (%H)%nSubject: %s%n%b" "${commit_range}" >"${commits_file}"
 
 repo_web_url=""
 remote_url="$(git config --get remote.origin.url 2>/dev/null)"
@@ -344,9 +341,7 @@ printf '%s\n' \
     "" \
     "Commits (${commit_count}):" >"${prompt_file}"
 
-while IFS= read -r line || [[ -n "${line}" ]]; do
-    printf '%s\n' "${line}" >>"${prompt_file}"
-done <"${commits_file}"
+git log --reverse --stat --format="Commit: %h (%H)%nSubject: %s%n%b" "${commit_range}" >>"${prompt_file}"
 
 api_key=""
 if declare -F gemini_get_api_key >/dev/null 2>&1; then
