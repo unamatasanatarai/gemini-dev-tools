@@ -1,4 +1,4 @@
-# gemini-tooling
+# gemini-dev-tools
 
 ![Language](https://img.shields.io/badge/language-bash-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -19,6 +19,7 @@ A cohesive collection of lightweight, POSIX-compliant Bash utilities powered by 
 - **Conventional Commits Generation**: Analyzes staged diffs, filters noisy dependency lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`), and crafts structured commit messages.
 - **Automated Git Workflows (`ggic` & `ggicp`)**: Stages working tree changes, executes the model rotation sequence with automatic fallback on failure, and creates commits (and pushes to remote with `ggicp`).
 - **Interactive Model Selection (`gemini-pick-model`)**: Easily pick and persist your primary preferred model using `fzf` or clean terminal menus.
+- **Intelligent Release Automation (`grel` / `git release`)**: Generates structured, high-quality release notes from Git commit logs using Gemini model rotation, runs pre-release tests/builds, and automates Git tags and GitHub releases.
 
 ---
 
@@ -40,9 +41,10 @@ gemini-key                       CLI vault to store, inspect, and supply API key
 gemini-rotate-models             Interactive selector to manage model rotation lists ordered newest to oldest.
 gemini-pick-model                Interactive utility to pick and save primary default model.
 gemini-list-models               Queries and filters models from the Gemini API.
-gemini-generate-commit-message   Core commit message generator analyzing Git diffs.
+gemini-commit-message            Core commit message generator analyzing Git diffs.
 ggic                             Automated workflow: stage all, fallback-rotate models, and commit.
 ggicp                            Automated workflow: stage all, fallback-rotate models, commit, and push.
+grel                             Automated release workflow with Gemini release notes, git tags, and GitHub releases.
 install.sh                       Download and installation script to place utilities into ~/.local/bin.
 LICENSE                          MIT License declaration.
 ```
@@ -56,7 +58,7 @@ LICENSE                          MIT License declaration.
 Execute the installation script using `curl`:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/unamatasanatarai/gemini-generate-commit-message/master/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/unamatasanatarai/gemini-dev-tools/master/install.sh | bash
 ```
 
 This installs the utilities into `$XDG_BIN_HOME` or `$HOME/.local/bin` and initializes `~/.config/gemini/`.
@@ -158,12 +160,12 @@ Shortcut that stages all changes, generates the commit message with fallback rot
 ggicp
 ```
 
-### Direct Message Output (`gemini-generate-commit-message`)
+### Direct Message Output (`gemini-commit-message`)
 
 Prints the generated Conventional Commit message directly to stdout without committing:
 
 ```bash
-gemini-generate-commit-message
+gemini-commit-message
 ```
 
 ### List Models (`gemini-list-models`)
@@ -173,6 +175,28 @@ List models available to your API key:
 ```bash
 # List only text/chat generation models, sorted newest to oldest:
 gemini-list-models --generate-only --newest
+```
+
+### Intelligent Release Management (`grel` / `git release`)
+
+Generates structured GitHub-flavored Markdown release notes from your commit history using Gemini model fallback rotation, updates version files, executes tests/builds, creates annotated git tags, and publishes GitHub releases:
+
+```bash
+# Preview release notes without making changes
+grel --dry-run
+
+# Automatically bump patch version (e.g. 1.0.0 -> 1.0.1)
+grel --patch
+
+# Or bump minor / major version
+grel --minor
+grel --major
+
+# Specify target version explicitly
+grel 1.2.0
+
+# Print only the generated markdown release notes
+grel --notes-only
 ```
 
 ---

@@ -1,46 +1,42 @@
 #!/usr/bin/env bash
-# gemini-common.sh - Shared configuration, authentication, and model utilities
+
+GEMINI_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME:-}/.config}/gemini"
+GEMINI_CRED_FILE="${GEMINI_CONFIG_DIR}/credentials"
+GEMINI_ROTATION_FILE="${GEMINI_CONFIG_DIR}/rotation"
+GEMINI_CACHE_DIR="${XDG_CACHE_HOME:-${HOME:-}/.cache}/gemini"
 
 gemini_config_dir() {
-    printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/gemini"
+    printf '%s\n' "${GEMINI_CONFIG_DIR}"
 }
 
 gemini_cred_file() {
-    printf '%s/credentials\n' "$(gemini_config_dir)"
+    printf '%s\n' "${GEMINI_CRED_FILE}"
 }
 
 gemini_rotation_file() {
-    printf '%s/rotation\n' "$(gemini_config_dir)"
+    printf '%s\n' "${GEMINI_ROTATION_FILE}"
 }
 
 gemini_cache_dir() {
-    printf '%s\n' "${XDG_CACHE_HOME:-$HOME/.cache}/gemini"
+    printf '%s\n' "${GEMINI_CACHE_DIR}"
 }
 
 gemini_migrate_legacy() {
-    local target_dir
-    local cred_file
-    local legacy_dir
-    local legacy_key
+    local legacy_dir="${XDG_CONFIG_HOME:-${HOME:-}/.config}/gemini-commit-message"
+    local legacy_key="${legacy_dir}/key"
 
-    target_dir="$(gemini_config_dir)"
-    cred_file="$(gemini_cred_file)"
-    legacy_dir="${XDG_CONFIG_HOME:-$HOME/.config}/gemini-commit-message"
-    legacy_key="${legacy_dir}/key"
-
-    if [[ -d "${legacy_dir}" ]]; then
-        if [[ ! -f "${cred_file}" && -f "${legacy_key}" ]]; then
-            mkdir -p -m 0700 "${target_dir}" 2>/dev/null || true
-            chmod 0700 "${target_dir}" 2>/dev/null || true
-            cp "${legacy_key}" "${cred_file}" 2>/dev/null || true
-            chmod 0600 "${cred_file}" 2>/dev/null || true
+    if [[ -d "${legacy_dir}" && -f "${legacy_key}" && ! -f "${GEMINI_CRED_FILE}" ]]; then
+        if [[ ! -d "${GEMINI_CONFIG_DIR}" ]]; then
+            mkdir -m 0700 -p "${GEMINI_CONFIG_DIR}"
         fi
+        chmod 0700 "${GEMINI_CONFIG_DIR}" 2>/dev/null
+        cp "${legacy_key}" "${GEMINI_CRED_FILE}" 2>/dev/null
+        chmod 0600 "${GEMINI_CRED_FILE}" 2>/dev/null
     fi
 }
 
 gemini_get_api_key() {
     local key=""
-    local cred_file
 
     if [[ -n "${GEMINI_API_KEY:-}" ]]; then
         key="${GEMINI_API_KEY}"
@@ -48,14 +44,13 @@ gemini_get_api_key() {
         key="${GOOGLE_API_KEY}"
     else
         gemini_migrate_legacy
-        cred_file="$(gemini_cred_file)"
-        if [[ -f "${cred_file}" ]]; then
-            IFS= read -r key <"${cred_file}" || true
+        if [[ -f "${GEMINI_CRED_FILE}" ]]; then
+            IFS= read -r key <"${GEMINI_CRED_FILE}"
         fi
     fi
 
-    key="${key%"${key##*[![:space:]]}"}"
     key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
     key="${key//$'\r'/}"
     key="${key//$'\n'/}"
 
@@ -67,37 +62,34 @@ gemini_get_api_key() {
 }
 
 gemini_get_default_rotation() {
-    cat <<'EOF'
-gemini-pro-latest
-gemini-flash-latest
-gemini-flash-lite-latest
-gemini-4-argon
-gemini-3.8-flash
-gemini-3.7-flash
-gemini-3.6-flash
-gemini-3.5-flash
-gemini-3.5-flash-lite
-gemini-3.1-flash-lite
-gemini-2.5-pro
-gemini-2.5-flash
-gemini-2.5-flash-lite
-EOF
+    printf '%s\n' \
+        "gemini-pro-latest" \
+        "gemini-flash-latest" \
+        "gemini-flash-lite-latest" \
+        "gemini-4-argon" \
+        "gemini-3.8-flash" \
+        "gemini-3.7-flash" \
+        "gemini-3.6-flash" \
+        "gemini-3.5-flash" \
+        "gemini-3.5-flash-lite" \
+        "gemini-3.1-flash-lite" \
+        "gemini-2.5-pro" \
+        "gemini-2.5-flash" \
+        "gemini-2.5-flash-lite"
 }
 
 gemini_get_rotation_models() {
-    local rot_file
-    local models=()
     local line=""
+    local -a models=()
 
-    rot_file="$(gemini_rotation_file)"
-
-    if [[ -f "${rot_file}" ]]; then
+    if [[ -f "${GEMINI_ROTATION_FILE}" ]]; then
         while IFS= read -r line || [[ -n "${line}" ]]; do
-            line="${line%"${line##*[![:space:]]}"}"
             line="${line#"${line%%[![:space:]]*}"}"
-            [[ -z "${line}" || "${line}" =~ ^# ]] && continue
-            models+=("${line}")
-        done <"${rot_file}"
+            line="${line%"${line##*[![:space:]]}"}"
+            if [[ -n "${line}" && "${line}" != \#* ]]; then
+                models+=("${line}")
+            fi
+        done <"${GEMINI_ROTATION_FILE}"
     fi
 
     if [[ ${#models[@]} -gt 0 ]]; then
@@ -107,10 +99,10 @@ gemini_get_rotation_models() {
     fi
 }
 
-# The topmost model in the rotation list is always the default model
 gemini_get_primary_model() {
     local cli_model="${1:-}"
     local top_model=""
+    local line=""
 
     if [[ -n "${cli_model}" ]]; then
         printf '%s\n' "${cli_model}"
@@ -132,7 +124,17 @@ gemini_get_primary_model() {
         return 0
     fi
 
-    top_model="$(gemini_get_rotation_models | head -n 1 || true)"
+    if [[ -f "${GEMINI_ROTATION_FILE}" ]]; then
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            if [[ -n "${line}" && "${line}" != \#* ]]; then
+                top_model="${line}"
+                break
+            fi
+        done <"${GEMINI_ROTATION_FILE}"
+    fi
+
     if [[ -n "${top_model}" ]]; then
         printf '%s\n' "${top_model}"
         return 0
@@ -142,26 +144,78 @@ gemini_get_primary_model() {
 }
 
 gemini_sort_models_newest_to_oldest() {
-    awk '
-    {
-        m = $0
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", m)
-        if (m == "" || m ~ /^#/) next
+    local -a items=()
+    local -a keys=()
+    local line=""
+    local is_latest=0
+    local major=0
+    local minor=0
+    local tier=0
+    local key=""
 
-        is_latest = (m ~ /-latest$/ || m ~ /-latest/) ? 1 : 0
-        major = 0
-        minor = 0
-        if (match(m, /[0-9]+(\.[0-9]+)?/)) {
-            ver = substr(m, RSTART, RLENGTH)
-            split(ver, vparts, ".")
-            major = vparts[1] + 0
-            minor = (length(vparts) > 1) ? vparts[2] + 0 : 0
-        }
-        tier = 0
-        if (m ~ /pro/) tier = 3
-        else if (m ~ /flash-lite/) tier = 1
-        else if (m ~ /flash/) tier = 2
-        printf("%d %05d %05d %d %s\n", is_latest, major, minor, tier, m)
-    }
-    ' | sort -k1,1nr -k2,2nr -k3,3nr -k4,4nr -k5,5r | awk '{print $5}'
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        if [[ -z "${line}" || "${line}" == \#* ]]; then
+            continue
+        fi
+
+        items+=("${line}")
+
+        is_latest=0
+        if [[ "${line}" == *-latest* ]]; then
+            is_latest=1
+        fi
+
+        major=0
+        minor=0
+        if [[ "${line}" =~ ([0-9]+)(\.([0-9]+))? ]]; then
+            major="$((10#${BASH_REMATCH[1]}))"
+            if [[ -n "${BASH_REMATCH[3]:-}" ]]; then
+                minor="$((10#${BASH_REMATCH[3]}))"
+            fi
+        fi
+
+        tier=0
+        if [[ "${line}" == *pro* ]]; then
+            tier=3
+        elif [[ "${line}" == *flash-lite* ]]; then
+            tier=1
+        elif [[ "${line}" == *flash* ]]; then
+            tier=2
+        fi
+
+        printf -v key "%d%05d%05d%d_%s" "${is_latest}" "${major}" "${minor}" "${tier}" "${line}"
+        keys+=("${key}")
+    done
+
+    local n="${#items[@]}"
+    if [[ "${n}" -le 1 ]]; then
+        if [[ "${n}" -eq 1 ]]; then
+            printf '%s\n' "${items[0]}"
+        fi
+        return 0
+    fi
+
+    local i=0
+    local j=0
+    local tmp_item=""
+    local tmp_key=""
+
+    for ((i = 1; i < n; i++)); do
+        tmp_key="${keys[i]}"
+        tmp_item="${items[i]}"
+        j=$((i - 1))
+        while ((j >= 0)) && [[ "${keys[j]}" < "${tmp_key}" ]]; do
+            keys[j + 1]="${keys[j]}"
+            items[j + 1]="${items[j]}"
+            ((j--))
+        done
+        keys[j + 1]="${tmp_key}"
+        items[j + 1]="${tmp_item}"
+    done
+
+    for ((i = 0; i < n; i++)); do
+        printf '%s\n' "${items[i]}"
+    done
 }

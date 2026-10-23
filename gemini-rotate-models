@@ -1,212 +1,246 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
-script_path="${BASH_SOURCE[0]}"
-script_dir="$(cd -- "$(dirname -- "${script_path}")" >/dev/null 2>&1 && pwd -P)"
+script_path="${BASH_SOURCE[0]:-}"
+script_dir=""
 
-if [[ -f "${script_dir}/gemini-common.sh" ]]; then
-    # shellcheck source=/dev/null
-    source "${script_dir}/gemini-common.sh"
-elif [[ -f "${XDG_BIN_HOME:-$HOME/.local/bin}/gemini-common.sh" ]]; then
-    # shellcheck source=/dev/null
-    source "${XDG_BIN_HOME:-$HOME/.local/bin}/gemini-common.sh"
+if [[ "${script_path}" == */* ]]; then
+    script_dir="${script_path%/*}"
 fi
 
-usage() {
-    cat <<EOF
-Usage: ${0##*/} [command|options]
+if [[ -n "${script_dir}" && -f "${script_dir}/gemini-common.sh" ]]; then
+    source "${script_dir}/gemini-common.sh"
+elif [[ -f "${XDG_BIN_HOME:-${HOME:-}/.local/bin}/gemini-common.sh" ]]; then
+    source "${XDG_BIN_HOME:-${HOME:-}/.local/bin}/gemini-common.sh"
+fi
 
-Select and manage Google Gemini models to rotate through (e.g. for ggic fallbacks).
-Selected models reside in XDG configuration (~/.config/gemini/rotation) and are
-strictly ordered from NEWEST to OLDEST.
-
-Commands & Options:
-  (no args)             Interactive selection (uses fzf if available, or menu)
-  --show, -s            Display current rotation list in order
-  --reset               Reset rotation to recommended defaults
-  --set <m1,m2,...>     Set rotation list from comma-separated names
-  --add <model>         Add a model to rotation (re-sorted newest to oldest)
-  --remove <model>      Remove a model from rotation
-  --all                 Include specialized/preview models in interactive list
-  -h, --help            Show this help message
-
-Examples:
-  ${0##*/}
-  ${0##*/} --show
-  ${0##*/} --reset
-  ${0##*/} --set gemini-3.8-flash,gemini-3.5-flash-lite,gemini-2.5-flash
-EOF
-}
-
-fetch_available_models() {
-    local include_all="${1:-false}"
-    local api_key=""
-    local raw_json=""
-
-    if api_key="$(gemini_get_api_key 2>/dev/null)" && [[ -n "${api_key}" ]]; then
-        raw_json="$(curl -fsS -H "x-goog-api-key: ${api_key}" "https://generativelanguage.googleapis.com/v1beta/models" 2>/dev/null || true)"
-    fi
-
-    if [[ -n "${raw_json}" ]] && command -v jq >/dev/null 2>&1; then
-        if [[ "${include_all}" == "true" ]]; then
-            printf '%s\n' "${raw_json}" | jq -r '
-                .models[]
-                | select(.supportedGenerationMethods[]? == "generateContent")
-                | .name
-                | sub("^models/"; "")
-            ' | gemini_sort_models_newest_to_oldest
-        else
-            printf '%s\n' "${raw_json}" | jq -r '
-                .models[]
-                | select(.supportedGenerationMethods[]? == "generateContent")
-                | .name
-                | sub("^models/"; "")
-            ' | gemini_sort_models_newest_to_oldest | grep "^gemini-" | grep -vE "tts|image|transcribe|robotics|banana|computer-use" || true
-        fi
-    else
-        # Fallback to default list if offline or API unreachable
-        gemini_get_default_rotation
-    fi
-}
-
-save_rotation() {
-    local target_file
-    local target_dir
-    local sorted_list
-
-    target_dir="$(gemini_config_dir)"
-    target_file="$(gemini_rotation_file)"
-
-    mkdir -p -m 0700 "${target_dir}" 2>/dev/null || true
-    chmod 0700 "${target_dir}" 2>/dev/null || true
-
-    sorted_list="$(printf '%s\n' "$@" | gemini_sort_models_newest_to_oldest)"
-
-    if [[ -z "${sorted_list}" ]]; then
-        printf 'Error: no models provided to save.\n' >&2
-        return 1
-    fi
-
-    printf '%s\n' "${sorted_list}" >"${target_file}"
-    chmod 0644 "${target_file}" 2>/dev/null || true
-
-    printf '\nUpdated rotation list saved to %s (ordered newest to oldest):\n' "${target_file}"
-    printf '%s\n' "${sorted_list}" | awk '{printf "  %2d. %s\n", NR, $0}'
-}
+target_dir="${GEMINI_CONFIG_DIR:-${XDG_CONFIG_HOME:-${HOME:-}/.config}/gemini}"
+target_file="${GEMINI_ROTATION_FILE:-${target_dir}/rotation}"
 
 action="${1:-}"
 include_all=false
 
-case "${action}" in
--h | --help | help)
-    usage
+if [[ "${action}" == "-h" || "${action}" == "--help" || "${action}" == "help" ]]; then
+    printf 'Usage: gemini-rotate-models [command|options]\n\n'
+    printf 'Select and manage Google Gemini models to rotate through (e.g. for ggic fallbacks).\n'
+    printf 'Selected models reside in XDG configuration (%s) and are\n' "${target_file}"
+    printf 'strictly ordered from NEWEST to OLDEST.\n\n'
+    printf 'Commands & Options:\n'
+    printf '  (no args)             Interactive selection (uses fzf if available, or menu)\n'
+    printf '  --show, -s            Display current rotation list in order\n'
+    printf '  --reset               Reset rotation to recommended defaults\n'
+    printf '  --set <m1,m2,...>     Set rotation list from comma-separated names\n'
+    printf '  --add <model>         Add a model to rotation (re-sorted newest to oldest)\n'
+    printf '  --remove <model>      Remove a model from rotation\n'
+    printf '  --all                 Include specialized/preview models in interactive list\n'
+    printf '  -h, --help            Show this help message\n\n'
+    printf 'Examples:\n'
+    printf '  gemini-rotate-models\n'
+    printf '  gemini-rotate-models --show\n'
+    printf '  gemini-rotate-models --reset\n'
+    printf '  gemini-rotate-models --set gemini-3.8-flash,gemini-3.5-flash-lite,gemini-2.5-flash\n'
     exit 0
-    ;;
--s | --show | show)
-    rot_file="$(gemini_rotation_file)"
+fi
+
+if [[ "${action}" == "-s" || "${action}" == "--show" || "${action}" == "show" ]]; then
     printf 'Current Gemini model rotation order (newest -> oldest):\n'
-    if [[ -f "${rot_file}" ]]; then
-        printf 'Source: %s\n' "${rot_file}"
-        gemini_get_rotation_models | awk '{printf "  %2d. %s\n", NR, $0}'
+    models=()
+    if [[ -f "${target_file}" ]]; then
+        printf 'Source: %s\n' "${target_file}"
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            if [[ -n "${line}" && "${line}" != \#* ]]; then
+                models+=("${line}")
+            fi
+        done <"${target_file}"
     else
-        printf 'Source: built-in defaults (no %s found)\n' "${rot_file}"
-        gemini_get_default_rotation | awk '{printf "  %2d. %s\n", NR, $0}'
+        printf 'Source: built-in defaults (no %s found)\n' "${target_file}"
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            [[ -n "${line}" ]] && models+=("${line}")
+        done < <(gemini_get_default_rotation)
     fi
+    idx=1
+    for m in "${models[@]}"; do
+        printf '  %2d. %s\n' "${idx}" "${m}"
+        ((idx++))
+    done
     exit 0
-    ;;
---reset | reset)
-    defaults="$(gemini_get_default_rotation)"
-    save_rotation "${defaults}"
-    exit 0
-    ;;
---set | set)
-    shift || true
+fi
+
+save_rotation_list() {
+    local -a input_list=("$@")
+    local -a sorted=()
+    local line=""
+
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        [[ -n "${line}" ]] && sorted+=("${line}")
+    done < <(
+        for item in "${input_list[@]}"; do
+            printf '%s\n' "${item}"
+        done | gemini_sort_models_newest_to_oldest
+    )
+
+    if [[ ${#sorted[@]} -eq 0 ]]; then
+        printf 'Error: no models provided to save.\n' >&2
+        return 1
+    fi
+
+    if [[ ! -d "${target_dir}" ]]; then
+        mkdir -m 0700 -p "${target_dir}"
+        if [[ $? -ne 0 ]]; then
+            printf 'Error: failed to create config directory: %s\n' "${target_dir}" >&2
+            return 1
+        fi
+    fi
+    chmod 0700 "${target_dir}" 2>/dev/null
+
+    printf '%s\n' "${sorted[@]}" >"${target_file}"
+    if [[ $? -ne 0 ]]; then
+        printf 'Error: failed to write rotation file: %s\n' "${target_file}" >&2
+        return 1
+    fi
+    chmod 0644 "${target_file}" 2>/dev/null
+
+    printf '\nUpdated rotation list saved to %s (ordered newest to oldest):\n' "${target_file}"
+    local idx=1
+    for m in "${sorted[@]}"; do
+        printf '  %2d. %s\n' "${idx}" "${m}"
+        ((idx++))
+    done
+}
+
+if [[ "${action}" == "--reset" || "${action}" == "reset" ]]; then
+    defaults=()
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        [[ -n "${line}" ]] && defaults+=("${line}")
+    done < <(gemini_get_default_rotation)
+    save_rotation_list "${defaults[@]}"
+    exit $?
+fi
+
+if [[ "${action}" == "--set" || "${action}" == "set" ]]; then
+    shift
     if [[ $# -eq 0 ]]; then
         printf 'Error: --set requires a comma-separated or space-separated list of models\n' >&2
         exit 1
     fi
-    models_raw="${*}"
+    models_raw="$*"
     IFS=', ' read -r -a input_models <<<"${models_raw}"
-    save_rotation "${input_models[@]}"
-    exit 0
-    ;;
---add | add)
-    shift || true
+    save_rotation_list "${input_models[@]}"
+    exit $?
+fi
+
+if [[ "${action}" == "--add" || "${action}" == "add" ]]; then
+    shift
     if [[ $# -eq 0 ]]; then
         printf 'Error: --add requires a model name\n' >&2
         exit 1
     fi
     new_model="$1"
     existing_models=()
-    while IFS= read -r line || [[ -n "${line}" ]]; do
-        [[ -n "${line}" ]] && existing_models+=("${line}")
-    done < <(gemini_get_rotation_models)
+    if [[ -f "${target_file}" ]]; then
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            if [[ -n "${line}" && "${line}" != \#* ]]; then
+                existing_models+=("${line}")
+            fi
+        done <"${target_file}"
+    else
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            [[ -n "${line}" ]] && existing_models+=("${line}")
+        done < <(gemini_get_default_rotation)
+    fi
     existing_models+=("${new_model}")
-    save_rotation "${existing_models[@]}"
-    exit 0
-    ;;
---remove | remove)
-    shift || true
+    save_rotation_list "${existing_models[@]}"
+    exit $?
+fi
+
+if [[ "${action}" == "--remove" || "${action}" == "remove" ]]; then
+    shift
     if [[ $# -eq 0 ]]; then
         printf 'Error: --remove requires a model name\n' >&2
         exit 1
     fi
     remove_model="$1"
     remaining_models=()
-    while IFS= read -r line || [[ -n "${line}" ]]; do
-        if [[ -n "${line}" && "${line}" != "${remove_model}" ]]; then
-            remaining_models+=("${line}")
-        fi
-    done < <(gemini_get_rotation_models)
+    if [[ -f "${target_file}" ]]; then
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            line="${line#"${line%%[![:space:]]*}"}"
+            line="${line%"${line##*[![:space:]]}"}"
+            if [[ -n "${line}" && "${line}" != \#* && "${line}" != "${remove_model}" ]]; then
+                remaining_models+=("${line}")
+            fi
+        done <"${target_file}"
+    else
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            if [[ -n "${line}" && "${line}" != "${remove_model}" ]]; then
+                remaining_models+=("${line}")
+            fi
+        done < <(gemini_get_default_rotation)
+    fi
     if [[ ${#remaining_models[@]} -eq 0 ]]; then
         printf 'Error: cannot remove all models from rotation\n' >&2
         exit 1
     fi
-    save_rotation "${remaining_models[@]}"
-    exit 0
-    ;;
---all)
-    include_all=true
-    shift || true
-    ;;
-esac
+    save_rotation_list "${remaining_models[@]}"
+    exit $?
+fi
 
-# Interactive Selection
-available_raw="$(fetch_available_models "${include_all}")"
+if [[ "${action}" == "--all" ]]; then
+    include_all=true
+    shift
+fi
+
 available_models=()
-while IFS= read -r line || [[ -n "${line}" ]]; do
-    [[ -n "${line}" ]] && available_models+=("${line}")
-done <<<"${available_raw}"
+api_key=""
+if declare -F gemini_get_api_key >/dev/null 2>&1; then
+    api_key="$(gemini_get_api_key 2>/dev/null)"
+else
+    api_key="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}"
+fi
+
+if [[ -n "${api_key}" ]] && command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+    raw_json="$(curl -fsS -H "x-goog-api-key: ${api_key}" "https://generativelanguage.googleapis.com/v1beta/models" 2>/dev/null)"
+    if [[ -n "${raw_json}" ]]; then
+        if [[ "${include_all}" == true ]]; then
+            while IFS= read -r line || [[ -n "${line}" ]]; do
+                [[ -n "${line}" ]] && available_models+=("${line}")
+            done < <(jq -r '.models[] | select(.supportedGenerationMethods[]? == "generateContent") | .name | sub("^models/"; "")' <<<"${raw_json}" | gemini_sort_models_newest_to_oldest)
+        else
+            while IFS= read -r line || [[ -n "${line}" ]]; do
+                [[ -n "${line}" ]] && available_models+=("${line}")
+            done < <(jq -r '.models[] | select(.supportedGenerationMethods[]? == "generateContent") | .name | sub("^models/"; "") | select(startswith("gemini-") and (test("tts|image|transcribe|robotics|banana|computer-use") | not))' <<<"${raw_json}" | gemini_sort_models_newest_to_oldest)
+        fi
+    fi
+fi
 
 if [[ ${#available_models[@]} -eq 0 ]]; then
-    printf 'Error: no models available to select\n' >&2
-    exit 1
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        [[ -n "${line}" ]] && available_models+=("${line}")
+    done < <(gemini_get_default_rotation)
 fi
 
 current_rotation=()
-while IFS= read -r line || [[ -n "${line}" ]]; do
-    [[ -n "${line}" ]] && current_rotation+=("${line}")
-done < <(gemini_get_rotation_models)
-
-cyan=""
-bold=""
-green=""
-dim=""
-reset=""
-
-if [[ -t 1 ]]; then
-    cyan=$'\033[36m'
-    bold=$'\033[1m'
-    green=$'\033[32m'
-    dim=$'\033[2m'
-    reset=$'\033[0m'
+if [[ -f "${target_file}" ]]; then
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        if [[ -n "${line}" && "${line}" != \#* ]]; then
+            current_rotation+=("${line}")
+        fi
+    done <"${target_file}"
+else
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+        [[ -n "${line}" ]] && current_rotation+=("${line}")
+    done < <(gemini_get_default_rotation)
 fi
 
 selected_models=()
 
 if command -v fzf >/dev/null 2>&1 && [[ -t 0 && -t 1 ]]; then
-    printf '\n%sLaunching interactive multi-select via fzf...%s\n' "${bold}" "${reset}"
-    printf '%sUse TAB to select/deselect items, Shift-TAB to unselect, Enter to confirm.%s\n\n' "${dim}" "${reset}"
+    printf '\nLaunching interactive multi-select via fzf...\n'
+    printf 'Use TAB to select/deselect items, Shift-TAB to unselect, Enter to confirm.\n\n'
 
     fzf_output="$(
         for m in "${available_models[@]}"; do
@@ -224,9 +258,8 @@ if command -v fzf >/dev/null 2>&1 && [[ -t 0 && -t 1 ]]; then
     done <<<"${fzf_output}"
 fi
 
-# Fallback terminal menu if fzf not used or cancelled
 if [[ ${#selected_models[@]} -eq 0 ]]; then
-    printf '\n%sAvailable Models (Ordered Newest -> Oldest):%s\n\n' "${bold}" "${reset}"
+    printf '\nAvailable Models (Ordered Newest -> Oldest):\n\n'
     for i in "${!available_models[@]}"; do
         num=$((i + 1))
         m="${available_models[i]}"
@@ -237,23 +270,23 @@ if [[ ${#selected_models[@]} -eq 0 ]]; then
                 break
             fi
         done
-        printf "%s%3d)%s %s %s%s%s\n" "${bold}" "${num}" "${reset}" "${is_selected}" "${cyan}" "${m}" "${reset}"
+        printf '%3d) %s %s\n' "${num}" "${is_selected}" "${m}"
     done
 
-    printf '\n%sEnter model numbers to rotate through (e.g., "1,2,4,5" or "1-6" or "all")%s\n' "${bold}" "${reset}"
-    printf '%sPress Enter to keep current selection: %s' "${dim}" "${reset}"
-    read -r choice || true
-    choice="${choice:-}"
+    printf '\nEnter model numbers to rotate through (e.g., "1,2,4,5" or "1-6" or "all")\n'
+    printf 'Press Enter to keep current selection: '
+    read -r choice
+    choice="${choice#"${choice%%[![:space:]]*}"}"
+    choice="${choice%"${choice##*[![:space:]]}"}"
 
     if [[ -z "${choice}" ]]; then
         selected_models=("${current_rotation[@]}")
     elif [[ "${choice}" == "all" ]]; then
         selected_models=("${available_models[@]}")
     else
-        # Parse ranges like 1-4 and numbers like 1, 2, 5
         IFS=',' read -ra parts <<<"${choice}"
         for part in "${parts[@]}"; do
-            part="$(echo "${part}" | tr -d ' ')"
+            part="${part//[[:space:]]/}"
             if [[ "${part}" =~ ^([0-9]+)-([0-9]+)$ ]]; then
                 start="${BASH_REMATCH[1]}"
                 end="${BASH_REMATCH[2]}"
@@ -268,7 +301,6 @@ if [[ ${#selected_models[@]} -eq 0 ]]; then
                     selected_models+=("${available_models[$((idx - 1))]}")
                 fi
             else
-                # Check direct model name
                 for m in "${available_models[@]}"; do
                     if [[ "${m}" == "${part}" ]]; then
                         selected_models+=("${m}")
@@ -285,4 +317,4 @@ if [[ ${#selected_models[@]} -eq 0 ]]; then
     exit 0
 fi
 
-save_rotation "${selected_models[@]}"
+save_rotation_list "${selected_models[@]}"
