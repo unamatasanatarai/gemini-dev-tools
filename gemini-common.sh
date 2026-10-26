@@ -114,16 +114,6 @@ gemini_get_primary_model() {
         return 0
     fi
 
-    if [[ -n "${GEMINI_SUMMARY_MODEL:-}" ]]; then
-        printf '%s\n' "${GEMINI_SUMMARY_MODEL}"
-        return 0
-    fi
-
-    if [[ -n "${GIT_SUMMARY_MODEL:-}" ]]; then
-        printf '%s\n' "${GIT_SUMMARY_MODEL}"
-        return 0
-    fi
-
     if [[ -f "${GEMINI_ROTATION_FILE}" ]]; then
         while IFS= read -r line || [[ -n "${line}" ]]; do
             line="${line#"${line%%[![:space:]]*}"}"

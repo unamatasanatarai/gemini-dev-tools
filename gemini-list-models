@@ -13,29 +13,16 @@ elif [[ -f "${XDG_BIN_HOME:-${HOME:-}/.local/bin}/gemini-common.sh" ]]; then
     source "${XDG_BIN_HOME:-${HOME:-}/.local/bin}/gemini-common.sh"
 fi
 
-generate_only=false
-sort_newest=false
-
 while [[ $# -gt 0 ]]; do
     case "$1" in
-    --generate-only)
-        generate_only=true
-        ;;
-    --newest)
-        sort_newest=true
-        ;;
     -h | --help)
-        printf 'Usage: gemini-list-models [options]\n\n'
-        printf 'List available Gemini models for your API key.\n\n'
-        printf 'Options:\n'
-        printf '  --generate-only   Only list models supporting generateContent (text/code/chat)\n'
-        printf '  --newest          Sort models from newest to oldest\n'
-        printf '  -h, --help        Show this help message\n'
+        printf 'Usage: gemini-list-models\n\n'
+        printf 'List available generation-capable Gemini models (sorted from newest to oldest).\n'
         exit 0
         ;;
     *)
         printf 'Error: unknown option: %s\n' "$1" >&2
-        printf 'Usage: gemini-list-models [--generate-only] [--newest] [-h|--help]\n' >&2
+        printf 'Usage: gemini-list-models [-h|--help]\n' >&2
         exit 2
         ;;
     esac
@@ -72,40 +59,20 @@ if [[ $? -ne 0 || -z "${raw_json}" ]]; then
 fi
 
 models=()
-if [[ "${generate_only}" == true ]]; then
-    while IFS= read -r line || [[ -n "${line}" ]]; do
-        [[ -n "${line}" ]] && models+=("${line}")
-    done < <(jq -r '.models[] | select(.supportedGenerationMethods[]? == "generateContent") | .name | sub("^models/"; "")' <<<"${raw_json}")
-else
-    while IFS= read -r line || [[ -n "${line}" ]]; do
-        [[ -n "${line}" ]] && models+=("${line}")
-    done < <(jq -r '.models[].name | sub("^models/"; "")' <<<"${raw_json}")
-fi
+while IFS= read -r line || [[ -n "${line}" ]]; do
+    [[ -n "${line}" ]] && models+=("${line}")
+done < <(jq -r '.models[] | select(.supportedGenerationMethods[]? == "generateContent") | .name | sub("^models/"; "")' <<<"${raw_json}")
 
 if [[ ${#models[@]} -eq 0 ]]; then
     exit 0
 fi
 
-if [[ "${sort_newest}" == true ]]; then
-    if declare -F gemini_sort_models_newest_to_oldest >/dev/null 2>&1; then
-        for m in "${models[@]}"; do
-            printf '%s\n' "${m}"
-        done | gemini_sort_models_newest_to_oldest
-    else
-        printf '%s\n' "${models[@]}"
-    fi
+if declare -F gemini_sort_models_newest_to_oldest >/dev/null 2>&1; then
+    for m in "${models[@]}"; do
+        printf '%s\n' "${m}"
+    done | gemini_sort_models_newest_to_oldest
 else
-    n="${#models[@]}"
-    for ((i = 1; i < n; i++)); do
-        tmp_item="${models[i]}"
-        j=$((i - 1))
-        while ((j >= 0)) && [[ "${models[j]}" > "${tmp_item}" ]]; do
-            models[j + 1]="${models[j]}"
-            ((j--))
-        done
-        models[j + 1]="${tmp_item}"
-    done
-    for ((i = 0; i < n; i++)); do
-        printf '%s\n' "${models[i]}"
+    for m in "${models[@]}"; do
+        printf '%s\n' "${m}"
     done
 fi

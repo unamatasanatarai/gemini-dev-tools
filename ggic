@@ -2,7 +2,6 @@
 
 push_after_commit=false
 staged_only=false
-cli_model=""
 current_branch=""
 line=""
 message=""
@@ -38,21 +37,12 @@ while [[ $# -gt 0 ]]; do
     --staged-only)
         staged_only=true
         ;;
-    --model)
-        if [[ -n "${2:-}" ]]; then
-            cli_model="$2"
-            shift
-        fi
-        ;;
-    --model=*)
-        cli_model="${1#*=}"
-        ;;
     -h | --help)
-        printf 'Usage: ggic [--push] [--staged-only] [--model <model_name>]\n'
+        printf 'Usage: ggic [--push] [--staged-only]\n'
         exit 0
         ;;
     *)
-        printf 'Usage: ggic [--push] [--staged-only] [--model <model_name>]\n' >&2
+        printf 'Usage: ggic [--push] [--staged-only]\n' >&2
         exit 2
         ;;
     esac
@@ -104,13 +94,8 @@ if git diff --cached --quiet; then
 fi
 
 generator_status=0
-if [[ -n "${cli_model}" ]]; then
-    "${generator}" --model "${cli_model}" >"${message_file}"
-    generator_status=$?
-else
-    "${generator}" >"${message_file}"
-    generator_status=$?
-fi
+"${generator}" >"${message_file}"
+generator_status=$?
 
 if [[ ${generator_status} -eq 12 ]]; then
     printf 'Error: GEMINI_API_KEY is not set or configured\n' >&2

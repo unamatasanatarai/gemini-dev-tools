@@ -13,25 +13,14 @@ elif [[ -f "${XDG_BIN_HOME:-${HOME:-}/.local/bin}/gemini-common.sh" ]]; then
     source "${XDG_BIN_HOME:-${HOME:-}/.local/bin}/gemini-common.sh"
 fi
 
-cli_model=""
-
 while [[ $# -gt 0 ]]; do
     case "$1" in
-    --model)
-        if [[ -n "${2:-}" ]]; then
-            cli_model="$2"
-            shift
-        fi
-        ;;
-    --model=*)
-        cli_model="${1#*=}"
-        ;;
     -h | --help)
-        printf 'Usage: gemini-commit-message [--model <model_name>]\n'
+        printf 'Usage: gemini-commit-message\n'
         exit 0
         ;;
     *)
-        printf 'Usage: gemini-commit-message [--model <model_name>]\n' >&2
+        printf 'Usage: gemini-commit-message\n' >&2
         exit 2
         ;;
     esac
@@ -43,40 +32,20 @@ if ! command -v git >/dev/null 2>&1; then
     exit 10
 fi
 
-if ! command -v curl >/dev/null 2>&1; then
-    printf 'Error: missing dependency: curl\n' >&2
-    exit 10
-fi
-
-if ! command -v jq >/dev/null 2>&1; then
-    printf 'Error: missing dependency: jq\n' >&2
-    exit 10
-fi
-
-api_key=""
-if declare -F gemini_get_api_key >/dev/null 2>&1; then
-    api_key="$(gemini_get_api_key 2>/dev/null)"
+prompt_cmd="gemini-prompt"
+if [[ -n "${script_dir}" && -x "${script_dir}/${prompt_cmd}" ]]; then
+    prompt_cmd="${script_dir}/${prompt_cmd}"
+elif command -v "${prompt_cmd}" >/dev/null 2>&1; then
+    prompt_cmd="$(command -v "${prompt_cmd}")"
 else
-    api_key="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}"
-fi
-
-if [[ -z "${api_key}" ]]; then
-    printf 'Error: GEMINI_API_KEY is not set or configured\n' >&2
-    printf "Run 'gemini-key set' or export GEMINI_API_KEY\n" >&2
-    exit 12
+    printf 'Error: gemini-prompt command not found\n' >&2
+    exit 10
 fi
 
 if ! git rev-parse --git-dir >/dev/null 2>&1; then
     printf 'Error: not inside a git repository\n' >&2
     exit 13
 fi
-
-lock_excludes=(
-    ':(exclude)package-lock.json'
-    ':(exclude)pnpm-lock.yaml'
-    ':(exclude)yarn.lock'
-    ':(exclude)bun.lockb'
-)
 
 tmp_dir="${TMPDIR:-/tmp}/gemini-commit-$$"
 if [[ -d "${tmp_dir}" ]]; then
@@ -94,13 +63,11 @@ trap 'exit 143' TERM
 trap 'exit 129' HUP
 
 diff_file="${tmp_dir}/diff.tmp"
-payload_file="${tmp_dir}/payload.json"
-response_file="${tmp_dir}/response.json"
 
-if ! git diff --cached --quiet -- . "${lock_excludes[@]}"; then
-    git diff --cached -- . "${lock_excludes[@]}" >"${diff_file}"
+if ! git diff --cached --quiet; then
+    git diff --cached >"${diff_file}"
 else
-    git diff -- . "${lock_excludes[@]}" >"${diff_file}"
+    git diff >"${diff_file}"
 fi
 
 diff_data=""
@@ -148,105 +115,4 @@ printf -v system_instruction '%s\n\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n
 
 printf -v user_prompt '<git_diff>\n%s\n</git_diff>' "${diff_data}"
 
-jq -n \
-    --arg sys "${system_instruction}" \
-    --arg prompt "${user_prompt}" \
-    '{
-        system_instruction: {
-            parts: [
-                {
-                    text: $sys
-                }
-            ]
-        },
-        contents: [
-            {
-                role: "user",
-                parts: [
-                    {
-                        text: $prompt
-                    }
-                ]
-            }
-        ],
-        generationConfig: {
-            temperature: 0.25,
-            topK: 40,
-            topP: 0.9,
-            maxOutputTokens: 2048
-        }
-    }' >"${payload_file}"
-
-models=()
-if [[ -n "${cli_model}" ]]; then
-    models=("${cli_model}")
-elif [[ -f "${GEMINI_ROTATION_FILE:-${XDG_CONFIG_HOME:-${HOME:-}/.config}/gemini/rotation}" ]]; then
-    while IFS= read -r line || [[ -n "${line}" ]]; do
-        line="${line#"${line%%[![:space:]]*}"}"
-        line="${line%"${line##*[![:space:]]}"}"
-        if [[ -n "${line}" && "${line}" != \#* ]]; then
-            models+=("${line}")
-        fi
-    done <"${GEMINI_ROTATION_FILE:-${XDG_CONFIG_HOME:-${HOME:-}/.config}/gemini/rotation}"
-fi
-
-if [[ ${#models[@]} -eq 0 ]]; then
-    while IFS= read -r line || [[ -n "${line}" ]]; do
-        [[ -n "${line}" ]] && models+=("${line}")
-    done < <(gemini_get_default_rotation)
-fi
-
-total_models="${#models[@]}"
-success=false
-
-for i in "${!models[@]}"; do
-    current_model="${models[i]}"
-    printf 'Trying model: %s\n' "${current_model}" >&2
-
-    http_status="$(
-        curl -sS \
-            -w "%{http_code}" \
-            -o "${response_file}" \
-            -X POST \
-            -H "Content-Type: application/json" \
-            -H "x-goog-api-key: ${api_key}" \
-            -d "@${payload_file}" \
-            "https://generativelanguage.googleapis.com/v1beta/models/${current_model}:generateContent" 2>/dev/null || printf '000'
-    )"
-
-    if [[ "${http_status}" != "200" ]]; then
-        if [[ $((i + 1)) -lt ${total_models} ]]; then
-            next_model="${models[$((i + 1))]}"
-            printf 'Warning: Model %s failed (HTTP %s). Trying next: %s...\n' \
-                "${current_model}" "${http_status}" "${next_model}" >&2
-        else
-            printf 'Warning: Model %s failed (HTTP %s).\n' \
-                "${current_model}" "${http_status}" >&2
-        fi
-        continue
-    fi
-
-    message="$(jq -r '.candidates[0].content.parts[0].text // ""' "${response_file}" 2>/dev/null)"
-
-    message="${message#"${message%%[![:space:]]*}"}"
-    message="${message%"${message##*[![:space:]]}"}"
-
-    if [[ "${message}" =~ ^\`\`\`([a-zA-Z0-9_-]+)?[[:space:]]*$'\n'(.*)$'\n'\`\`\`$ ]]; then
-        message="${BASH_REMATCH[2]}"
-        message="${message#"${message%%[![:space:]]*}"}"
-        message="${message%"${message##*[![:space:]]}"}"
-    fi
-
-    if [[ -n "${message}" ]]; then
-        success=true
-        printf '%s\n' "${message}"
-        break
-    else
-        printf 'Warning: Model %s returned an empty response. Trying next...\n' "${current_model}" >&2
-    fi
-done
-
-if [[ "${success}" == false ]]; then
-    printf 'Error: all models failed to generate a commit message\n' >&2
-    exit 19
-fi
+"${prompt_cmd}" --system "${system_instruction}" "${user_prompt}"

@@ -7,12 +7,13 @@ files=(
     "gemini-common.sh"
     "gemini-key"
     "gemini-list-models"
-    "gemini-pick-model"
     "gemini-rotate-models"
+    "gemini-prompt"
     "gemini-commit-message"
     "ggic"
     "ggicp"
-    "grel"
+    "gemini-release-notes"
+    "ggrel"
 )
 
 if ! command -v curl >/dev/null 2>&1; then
@@ -115,12 +116,13 @@ printf '%s\n' \
     'suite utilities:' \
     '  gemini-key             - Manage Gemini API key credentials' \
     '  gemini-rotate-models   - Select & order rotation fallback models (newest to oldest)' \
-    '  gemini-pick-model      - Set default primary model' \
     '  gemini-list-models     - List available models from API' \
+    '  gemini-prompt          - Send prompt to Gemini API with fallback rotation' \
     '  gemini-commit-message  - Generate commit message from diff' \
     '  ggic                   - Auto-stage, fallback-rotate models, and commit' \
     '  ggicp                  - Auto-stage, fallback-rotate models, commit, and push' \
-    '  grel                   - Automated release workflow with Gemini release notes (also git release)' \
+    '  gemini-release-notes   - Generate categorized Markdown release notes with Gemini' \
+    '  ggrel                  - Automated release workflow: test, bump version, tag, and publish' \
     '' \
     'quick start:' \
     '  1. Store your API key:' \

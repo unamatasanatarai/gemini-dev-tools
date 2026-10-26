@@ -1,0 +1,381 @@
+#!/usr/bin/env bash
+
+script_path="${BASH_SOURCE[0]:-}"
+script_dir=""
+
+if [[ "${script_path}" == */* ]]; then
+    script_dir="${script_path%/*}"
+fi
+
+if [[ -n "${script_dir}" && -f "${script_dir}/gemini-common.sh" ]]; then
+    source "${script_dir}/gemini-common.sh"
+elif [[ -f "${XDG_BIN_HOME:-${HOME:-}/.local/bin}/gemini-common.sh" ]]; then
+    source "${XDG_BIN_HOME:-${HOME:-}/.local/bin}/gemini-common.sh"
+elif command -v gemini-common.sh >/dev/null 2>&1; then
+    source "$(command -v gemini-common.sh)"
+fi
+
+die() {
+    printf 'Error: %s\n' "$*" >&2
+    exit 1
+}
+
+warn() {
+    printf 'Warning: %s\n' "$*" >&2
+}
+
+info() {
+    printf '\n==> %s\n' "$*"
+}
+
+usage() {
+    printf 'Usage:\n'
+    printf '  ggrel <version> [options]\n\n'
+    printf 'Arguments:\n'
+    printf '  <version>              Target version (e.g. 1.0.1 or v1.0.1).\n\n'
+    printf 'Release Notes Options (Required):\n'
+    printf '  -f, --notes-file FILE  Read release notes from FILE (use "-" for stdin).\n'
+    printf '  --notes TEXT           Specify release notes inline as a string.\n'
+    printf '                         Can also be piped via stdin (e.g. gemini-release-notes 1.0.1 | ggrel 1.0.1).\n\n'
+    printf 'Execution Modes:\n'
+    printf '  -n, --dry-run, --preview\n'
+    printf '                         Preview release actions without modifying the repo.\n\n'
+    printf 'Customization Options:\n'
+    printf '  --app-name NAME        Application name for the release (defaults to directory name).\n'
+    printf '  --test-cmd CMD         Command to execute for pre-release tests.\n'
+    printf '  --build-cmd CMD        Command to execute for building release artifacts.\n'
+    printf '  -a, --attach FILE      Artifact file to attach to the GitHub release (repeatable).\n'
+    printf '  -h, --help             Show this help message.\n'
+}
+
+for dep in git gh; do
+    if ! command -v "${dep}" >/dev/null 2>&1; then
+        die "Missing required dependency: ${dep}"
+    fi
+done
+
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    die "Must be run inside a Git repository."
+fi
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [[ -z "${repo_root}" || ! -d "${repo_root}" ]]; then
+    die "Failed to determine git repository top-level directory."
+fi
+cd "${repo_root}" || die "Failed to enter git repository root."
+
+app_name=""
+target_version=""
+test_cmd=""
+build_cmd=""
+version_file="${repo_root}/VERSION"
+assets=()
+notes_file=""
+inline_notes=""
+dry_run=false
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+    --app-name)
+        [[ -n "${2:-}" ]] || die "Missing value for $1"
+        app_name="$2"
+        shift 2
+        ;;
+    --app-name=*)
+        app_name="${1#*=}"
+        shift
+        ;;
+    --version-file | --version-file=*)
+        die "The version file is always 'VERSION' in the repository root. --version-file is not supported."
+        ;;
+    -f | --notes-file)
+        [[ -n "${2:-}" ]] || die "Missing value for $1"
+        notes_file="$2"
+        shift 2
+        ;;
+    -f=* | --notes-file=*)
+        notes_file="${1#*=}"
+        shift
+        ;;
+    --notes)
+        [[ -n "${2:-}" ]] || die "Missing value for $1"
+        inline_notes="$2"
+        shift 2
+        ;;
+    --notes=*)
+        inline_notes="${1#*=}"
+        shift
+        ;;
+    -n | --dry-run | --preview)
+        dry_run=true
+        shift
+        ;;
+    --test-cmd)
+        [[ -n "${2:-}" ]] || die "Missing value for $1"
+        test_cmd="$2"
+        shift 2
+        ;;
+    --test-cmd=*)
+        test_cmd="${1#*=}"
+        shift
+        ;;
+    --build-cmd)
+        [[ -n "${2:-}" ]] || die "Missing value for $1"
+        build_cmd="$2"
+        shift 2
+        ;;
+    --build-cmd=*)
+        build_cmd="${1#*=}"
+        shift
+        ;;
+    -a | --attach)
+        [[ -n "${2:-}" ]] || die "Missing value for $1"
+        assets+=("$2")
+        shift 2
+        ;;
+    -a=* | --attach=*)
+        assets+=("${1#*=}")
+        shift
+        ;;
+    --model | --model=* | --notes-only)
+        die "Unknown option: $1. Release notes generation is handled by 'gemini-release-notes'."
+        ;;
+    -h | --help)
+        usage
+        exit 0
+        ;;
+    -*)
+        die "Unknown option: $1"
+        ;;
+    *)
+        if [[ -z "${target_version}" ]]; then
+            target_version="$1"
+            shift
+        else
+            die "Unexpected extra positional argument: $1"
+        fi
+        ;;
+    esac
+done
+
+if [[ -z "${app_name}" ]]; then
+    app_name="${repo_root##*/}"
+fi
+
+previous_tag=""
+if previous_tag="$(git describe --tags --match "v[0-9]*" --abbrev=0 HEAD 2>/dev/null)"; then
+    :
+elif previous_tag="$(git describe --tags --abbrev=0 HEAD 2>/dev/null)"; then
+    :
+fi
+
+notes_content=""
+if [[ -n "${inline_notes}" ]]; then
+    notes_content="${inline_notes}"
+elif [[ -n "${notes_file}" ]]; then
+    if [[ "${notes_file}" == "-" ]]; then
+        notes_content="$(cat)"
+    elif [[ -f "${notes_file}" ]]; then
+        notes_content="$(<"${notes_file}")"
+    else
+        die "Release notes file not found: ${notes_file}"
+    fi
+elif [[ ! -t 0 ]]; then
+    notes_content="$(cat)"
+fi
+
+trimmed_notes="${notes_content#"${notes_content%%[![:space:]]*}"}"
+trimmed_notes="${trimmed_notes%"${trimmed_notes##*[![:space:]]}"}"
+if [[ -z "${trimmed_notes}" ]]; then
+    die "Release notes are required. Provide them using -f/--notes-file <file>, --notes <text>, or pipe from 'gemini-release-notes' (e.g. gemini-release-notes 1.0.1 | ggrel 1.0.1)."
+fi
+
+if [[ -z "${target_version}" ]]; then
+    if [[ -r /dev/tty ]]; then
+        printf 'Previous release: %s\n' "${previous_tag:-"(none)"}" >&2
+        printf 'Target version: ' >&2
+        read -r user_input </dev/tty
+        user_input="${user_input:-}"
+        target_version="${user_input#v}"
+    elif [[ -t 0 ]]; then
+        printf 'Previous release: %s\n' "${previous_tag:-"(none)"}" >&2
+        printf 'Target version: ' >&2
+        read -r user_input
+        user_input="${user_input:-}"
+        target_version="${user_input#v}"
+    fi
+fi
+
+if [[ -z "${target_version}" ]]; then
+    die "Specify a target version (e.g. ggrel 1.0.1)."
+fi
+
+target_version="${target_version#v}"
+
+if [[ ! "${target_version}" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+    die "Invalid target version: \"${target_version}\". Expected semver e.g. 1.0.1"
+fi
+
+if [[ ! -f "${version_file}" && "${dry_run}" == "false" ]]; then
+    printf '0.0.0\n' >"${version_file}"
+fi
+
+test_cmd="${test_cmd//\$\{target_version\}/$target_version}"
+test_cmd="${test_cmd//\$target_version/$target_version}"
+test_cmd="${test_cmd//\$\{version\}/$target_version}"
+test_cmd="${test_cmd//\$version/$target_version}"
+
+build_cmd="${build_cmd//\$\{target_version\}/$target_version}"
+build_cmd="${build_cmd//\$target_version/$target_version}"
+build_cmd="${build_cmd//\$\{version\}/$target_version}"
+build_cmd="${build_cmd//\$version/$target_version}"
+
+if ((${#assets[@]} > 0)); then
+    resolved_assets=()
+    for asset in "${assets[@]}"; do
+        asset="${asset//\$\{target_version\}/$target_version}"
+        asset="${asset//\$target_version/$target_version}"
+        asset="${asset//\$\{version\}/$target_version}"
+        asset="${asset//\$version/$target_version}"
+        resolved_assets+=("${asset}")
+    done
+    assets=("${resolved_assets[@]}")
+fi
+
+if [[ "${dry_run}" == "false" ]]; then
+    if ! git diff --cached --quiet; then
+        die "You have staged changes. Commit or unstage them before releasing."
+    fi
+    if git show-ref --verify --quiet "refs/tags/v${target_version}"; then
+        die "Tag v${target_version} already exists."
+    fi
+fi
+
+tmp_dir="${TMPDIR:-/tmp}/ggrel-$$"
+if [[ -d "${tmp_dir}" ]]; then
+    rm -rf "${tmp_dir}"
+fi
+mkdir -m 700 "${tmp_dir}"
+if [[ $? -ne 0 ]]; then
+    die "Failed to create temporary directory: ${tmp_dir}"
+fi
+trap 'rm -rf "${tmp_dir}"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+release_notes_file="${tmp_dir}/release_notes.md"
+printf '%s\n' "${notes_content}" >"${release_notes_file}"
+
+printf '\n'
+printf '%s\n' '=================================================='
+printf 'Release preview: %s v%s\n' "${app_name}" "${target_version}"
+printf '%s\n' '=================================================='
+printf 'Previous tag:     %s\n' "${previous_tag:-"(none)"}"
+printf 'Target version:   v%s\n' "${target_version}"
+printf 'Version file:     %s\n' "${version_file}"
+if [[ ${#assets[@]} -gt 0 ]]; then
+    printf 'Release assets:   %s\n' "${assets[*]}"
+fi
+printf '\n%s\n' 'Release notes to be published:'
+printf '%s\n' '--------------------------------------------------'
+printf '%s\n' "${notes_content}"
+printf '%s\n' '--------------------------------------------------'
+printf '\n'
+
+if [[ "${dry_run}" == "true" ]]; then
+    printf '%s\n' "[Dry run] No changes, tags, or releases were performed."
+    exit 0
+fi
+
+if [[ -r /dev/tty ]]; then
+    printf "Proceed with release v%s? Type 'yes' to continue: " "${target_version}"
+    confirmation=""
+    IFS= read -r confirmation </dev/tty
+    if [[ "${confirmation}" != "yes" ]]; then
+        printf '%s\n' "Release cancelled. No actions were performed."
+        exit 0
+    fi
+elif [[ -t 0 ]]; then
+    printf "Proceed with release v%s? Type 'yes' to continue: " "${target_version}"
+    confirmation=""
+    IFS= read -r confirmation
+    if [[ "${confirmation}" != "yes" ]]; then
+        printf '%s\n' "Release cancelled. No actions were performed."
+        exit 0
+    fi
+else
+    die "Cannot prompt for confirmation without an interactive terminal (/dev/tty)."
+fi
+
+if [[ -n "${test_cmd}" ]]; then
+    info "Running pre-release tests: ${test_cmd}..."
+    bash -c "${test_cmd}"
+    if [[ $? -ne 0 ]]; then
+        die "Pre-release tests failed."
+    fi
+fi
+
+if [[ ! -f "${version_file}" ]]; then
+    printf '0.0.0\n' >"${version_file}"
+fi
+
+info "Updating version file (${version_file})...."
+printf '%s\n' "${target_version}" >"${version_file}"
+git add "${version_file}"
+if ! git diff --cached --quiet -- "${version_file}"; then
+    git commit -m "chore(release): bump version to v${target_version}"
+fi
+
+if [[ -n "${build_cmd}" ]]; then
+    info "Running build command: ${build_cmd}..."
+    bash -c "${build_cmd}"
+    if [[ $? -ne 0 ]]; then
+        die "Release build command failed."
+    fi
+fi
+
+if [[ ${#assets[@]} -gt 0 ]]; then
+    for asset in "${assets[@]}"; do
+        if [[ ! -f "${asset}" ]]; then
+            die "Expected release asset was not found: ${asset}"
+        fi
+    done
+fi
+
+info "Creating annotated tag v${target_version}..."
+git tag -a "v${target_version}" -m "Release ${app_name} v${target_version}"
+if [[ $? -ne 0 ]]; then
+    die "Failed to create git tag v${target_version}."
+fi
+
+current_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)"
+if [[ -n "${current_branch}" ]]; then
+    info "Pushing branch ${current_branch}..."
+    git push origin "${current_branch}"
+    if [[ $? -ne 0 ]]; then
+        die "Failed to push branch ${current_branch} to origin."
+    fi
+else
+    die "Detached HEAD: refusing to push release branch."
+fi
+
+info "Pushing tag v${target_version}..."
+git push origin "v${target_version}"
+if [[ $? -ne 0 ]]; then
+    die "Failed to push tag v${target_version} to origin."
+fi
+
+info "Publishing GitHub release v${target_version} via gh..."
+gh_args=("release" "create" "v${target_version}" "--title" "${app_name} v${target_version}" "--notes-file" "${release_notes_file}")
+if [[ ${#assets[@]} -gt 0 ]]; then
+    for asset in "${assets[@]}"; do
+        gh_args+=("${asset}")
+    done
+fi
+gh "${gh_args[@]}"
+if [[ $? -ne 0 ]]; then
+    die "Failed to publish GitHub release via gh."
+fi
+
+info "Release v${target_version} successfully completed!"

@@ -14,10 +14,10 @@ A modular suite of high-performance Pure Bash CLI utilities built on the Google 
 
 ## Features
 
-- **Automated Conventional Commits**: Inspects staged and unstaged Git diffs, excludes lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `bun.lockb`), and generates standards-compliant commit messages with concise subjects and technical bullet points.
+- **Automated Conventional Commits**: Inspects staged and unstaged Git diffs (respecting `.gitignore`), and generates standards-compliant commit messages with concise subjects and technical bullet points.
 - **Ordered Model Fallback Rotation**: Automatically iterates through a user-configurable rotation list sorted from newest to oldest model versions upon HTTP 429 rate limits, service errors, or empty completions.
-- **XDG Credential Vault (`gemini-key`)**: Securely stores API keys under strict `0600` permissions with status validation, non-echoing interactive prompts, and runtime environment variable exports.
-- **Full Release Automation (`grel` / `git release`)**: Synthesizes commit logs and diffstats into categorized GitHub-flavored Markdown release notes, executes pre-release test and build hooks, bumps SemVer tags, and publishes releases via the GitHub CLI.
+- **Intelligent Release Notes (`gemini-release-notes`)**: Synthesizes commit logs and diffstats into categorized GitHub-flavored Markdown release notes with automatic commit hyperlinking and fallback model rotation.
+- **Full Release Automation (`ggrel`)**: Executes pre-release test and build hooks, bumps SemVer tags, updates version files, and publishes releases via the GitHub CLI using provided or generated release notes.
 - **Interactive Model Selection**: Inspects Gemini API capabilities, filters generation-capable models, and provides interactive model picking and rotation management using optional `fzf` integration with fallback terminal menus.
 - **Pure Bash Architecture**: Implemented with flat execution flow, zero subshells in core paths, native array sorting, and elimination of unnecessary external binary forks (`awk`, `sed`, `grep`, `tr`, `mktemp`).
 
@@ -34,22 +34,19 @@ A modular suite of high-performance Pure Bash CLI utilities built on the Google 
 
 ---
 
-## Project Structure
+### Command Documentation
 
-```text
-gemini-common.sh         Shared library for XDG resolution, credential retrieval, and native model sorting
-gemini-key               Credential vault to set, inspect, export, and run commands with API keys
-gemini-list-models       Queries and filters generation-capable Gemini models from the API
-gemini-pick-model        Interactive menu to select and promote a primary default model
-gemini-rotate-models     Interactive selector and CLI manager for fallback rotation order
-gemini-commit-message    Core generator analyzing Git diffs to output Conventional Commit messages
-ggic                     Automated Git workflow: stage changes, generate commit message, and commit
-ggicp                    Wrapper workflow: stage changes, commit with model rotation, and push upstream
-grel                     Automated release pipeline: generate release notes, tag, test, build, and publish
-install.sh               Installer pulling release assets dynamically into ~/.local/bin
-LICENSE                  MIT License declaration
-README.md                Project documentation
-```
+Detailed usage guides, flag definitions, and workflow examples for each utility are available in the [`docs/`](docs/README.md) directory:
+
+- [`gemini-key`](docs/gemini-key.md) - Credential management and environment variable injection
+- [`gemini-list-models`](docs/gemini-list-models.md) - Model capability filtering and chronological sorting
+- [`gemini-rotate-models`](docs/gemini-rotate-models.md) - Model fallback rotation configuration
+- [`gemini-prompt`](docs/gemini-prompt.md) - Direct prompt execution with model fallback rotation
+- [`gemini-commit-message`](docs/gemini-commit-message.md) - Conventional Commit generation from Git diffs
+- [`ggic`](docs/ggic.md) - Interactive stage, generate, review, and commit workflow
+- [`ggicp`](docs/ggicp.md) - Commit with model rotation and push upstream
+- [`gemini-release-notes`](docs/gemini-release-notes.md) - Categorized Markdown release notes generation
+- [`ggrel`](docs/ggrel.md) - Full release automation (tests, builds, tags, pushes, and GitHub release)
 
 ---
 
@@ -92,24 +89,9 @@ The suite respects the following environment variables, evaluated in precedence 
 | `GEMINI_API_KEY` | Primary Gemini API key |
 | `GOOGLE_API_KEY` | Secondary Gemini API key fallback |
 | `GEMINI_MODEL` | Explicit primary model override across all utilities |
-| `GEMINI_SUMMARY_MODEL` | Secondary model override |
-| `GIT_SUMMARY_MODEL` | Fallback model override |
 | `XDG_CONFIG_HOME` | Configuration root directory (defaults to `$HOME/.config`) |
 | `XDG_BIN_HOME` | Binary installation directory (defaults to `$HOME/.local/bin`) |
 | `XDG_CACHE_HOME` | Cache root directory (defaults to `$HOME/.cache`) |
-
-### Repository Release Hooks
-
-When running `grel`, repository-specific configuration can be defined in `.git-release.sh` or `.release.sh` at the repository root:
-
-```bash
-APP_NAME="my-app"
-TEST_CMD="npm test"
-BUILD_CMD="npm run build"
-VERSION_FILE="package.json"
-GEMINI_MODEL="gemini-2.5-flash"
-RELEASE_ASSETS=("dist/app.tar.gz")
-```
 
 ---
 
@@ -175,20 +157,26 @@ gemini-rotate-models --add gemini-2.5-pro
 gemini-rotate-models --remove gemini-3.5-flash-lite
 ```
 
-### 3. Select Primary Default Model (`gemini-pick-model`)
+### 3. Query Available Models (`gemini-list-models`)
 
-Interactively promote a model to the top of the rotation order:
+Query generation-capable API models ordered chronologically from newest to oldest:
 
 ```bash
-gemini-pick-model
+gemini-list-models
 ```
 
-### 4. Query Available Models (`gemini-list-models`)
+### 4. Execute Gemini Prompts (`gemini-prompt`)
 
-Query API models filtered by generation capabilities and ordered chronologically:
+Send any prompt to the Gemini API with automatic model fallback rotation:
 
 ```bash
-gemini-list-models --generate-only --newest
+gemini-prompt "Explain the difference between rebase and merge in Git"
+```
+
+Pass prompts via pipe with system instructions:
+
+```bash
+git diff | gemini-prompt --system "Summarize changes concisely"
 ```
 
 ### 5. Generate Commit Messages (`gemini-commit-message`)
@@ -197,12 +185,6 @@ Generate and print a Conventional Commit message to stdout based on the working 
 
 ```bash
 gemini-commit-message
-```
-
-Override the model for a single invocation:
-
-```bash
-gemini-commit-message --model gemini-2.5-flash
 ```
 
 ### 6. Automated Commit Workflows (`ggic` & `ggicp`)
@@ -225,27 +207,39 @@ Stage, commit, and push upstream in a single command:
 ggicp
 ```
 
-### 7. Release Automation (`grel` / `git release`)
+### 7. Release Automation (`gemini-release-notes` & `ggrel`)
 
-Analyze commits since the last release, generate structured markdown release notes, execute test/build hooks, create an annotated Git tag, and publish to GitHub:
+The release pipeline is split into two composable commands:
+
+#### Step 1: Generate Release Notes (`gemini-release-notes`)
+
+Analyzes commits between the previous release tag and current `HEAD`, synthesizes changes using Gemini with fallback model rotation, and outputs structured Markdown release notes to stdout:
 
 ```bash
-# Preview release notes and target version without altering state
-grel --dry-run
+# Output release notes for a target version to stdout
+gemini-release-notes 1.2.0
 
-# Automatically compute SemVer bumps
-grel --patch
-grel --minor
-grel --major
+# Redirect to a file via shell redirection
+gemini-release-notes 1.2.0 > release_notes.md
+```
 
-# Specify an explicit version target
-grel 1.2.0
+#### Step 2: Publish Release (`ggrel`)
 
-# Output release notes only to stdout
-grel --notes-only
+Takes release notes generated in Step 1, runs test/build hooks, bumps the version file, creates an annotated Git tag, pushes to origin, and publishes via the GitHub CLI:
 
-# Attach release assets to GitHub release
-grel --patch -a dist/bundle.tar.gz
+```bash
+# Pipe directly from gemini-release-notes
+gemini-release-notes 1.2.0 | ggrel 1.2.0
+
+# Provide pre-generated notes via file or inline argument
+ggrel 1.2.0 -f release_notes.md
+ggrel 1.2.0 --notes "### Features\n- New capability"
+
+# Preview release actions without altering repository state
+gemini-release-notes 1.2.0 | ggrel 1.2.0 --dry-run
+
+# Attach release assets
+ggrel 1.2.0 -f release_notes.md -a dist/bundle.tar.gz
 ```
 
 ---
