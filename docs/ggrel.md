@@ -54,6 +54,32 @@ ggrel <version> [options]
 
 ---
 
+## Configuration Hooks (`.release.sh`)
+
+Instead of repeatedly specifying CLI options for every release, you can create a `.release.sh` (or `.git-release.sh`) file in the root of the repository. `ggrel` automatically sources this file if present.
+
+Supported variables:
+- `APP_NAME`: Application name used in release titles and tags.
+- `TEST_CMD`: Shell command for pre-release test execution.
+- `BUILD_CMD`: Shell command to build or package release assets before tagging.
+- `RELEASE_ASSETS`: Bash array of asset file paths to upload to the GitHub release. Supports `${target_version}` placeholders (use single quotes to avoid premature expansion).
+
+Example `.release.sh`:
+```bash
+#!/usr/bin/env bash
+APP_NAME="my-app"
+TEST_CMD="npm test"
+BUILD_CMD='tar -czf "dist/my-app-${target_version}.tar.gz" build/'
+RELEASE_ASSETS=(
+    'dist/my-app-${target_version}.tar.gz'
+    "install.sh"
+)
+```
+
+Command-line flags always take precedence over values defined in the configuration hook.
+
+---
+
 ## Version File (`VERSION`)
 
 `ggrel` always manages a `VERSION` file in the root of the repository. You never need to pass or configure a version file path.

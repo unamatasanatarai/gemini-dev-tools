@@ -1,2 +1,4 @@
 key
 .agents/
+*.tar.gz
+*.zip

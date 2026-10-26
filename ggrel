@@ -45,7 +45,11 @@ usage() {
     printf '  --test-cmd CMD         Command to execute for pre-release tests.\n'
     printf '  --build-cmd CMD        Command to execute for building release artifacts.\n'
     printf '  -a, --attach FILE      Artifact file to attach to the GitHub release (repeatable).\n'
-    printf '  -h, --help             Show this help message.\n'
+    printf '  -h, --help             Show this help message.\n\n'
+    printf 'Configuration Hooks:\n'
+    printf '  If a .release.sh or .git-release.sh file is present in the repository root,\n'
+    printf '  it will be sourced automatically. Supported hook variables:\n'
+    printf '    APP_NAME, TEST_CMD, BUILD_CMD, RELEASE_ASSETS\n'
 }
 
 for dep in git gh; do
@@ -73,6 +77,26 @@ assets=()
 notes_file=""
 inline_notes=""
 dry_run=false
+if [[ -f "${repo_root}/.git-release.sh" ]]; then
+    source "${repo_root}/.git-release.sh"
+elif [[ -f "${repo_root}/.release.sh" ]]; then
+    source "${repo_root}/.release.sh"
+fi
+
+if [[ -n "${APP_NAME:-}" ]]; then
+    app_name="${APP_NAME}"
+fi
+if [[ -n "${TEST_CMD:-}" ]]; then
+    test_cmd="${TEST_CMD}"
+fi
+if [[ -n "${BUILD_CMD:-}" ]]; then
+    build_cmd="${BUILD_CMD}"
+fi
+if declare -p RELEASE_ASSETS >/dev/null 2>&1; then
+    for asset in "${RELEASE_ASSETS[@]}"; do
+        assets+=("${asset}")
+    done
+fi
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
