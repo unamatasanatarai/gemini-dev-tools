@@ -28,7 +28,7 @@ ggrel <version> [options]
 | :--- | :--- |
 | `-f, --notes-file <file>` | Reads release notes from a file path. Specify `-` to read from standard input. |
 | `--notes <text>` | Passes release notes directly as an inline string. |
-| *(stdin pipe)* | Pipe release notes directly via stdin (e.g. `gemini-release-notes 1.2.0 | ggrel 1.2.0`). |
+| *(stdin pipe)* | Pipe release notes directly via stdin (e.g. `gemini-release-notes | ggrel 1.2.0`). |
 
 ---
 
@@ -108,12 +108,12 @@ Command-line flags always take precedence over values defined in the configurati
 
 ### Complete Pipeline via Pipe
 ```bash
-gemini-release-notes 1.2.0 | ggrel 1.2.0
+gemini-release-notes | ggrel 1.2.0
 ```
 
 ### Dry Run Preview
 ```bash
-gemini-release-notes 1.2.0 | ggrel 1.2.0 --dry-run
+gemini-release-notes | ggrel 1.2.0 --dry-run
 ```
 
 ### Release from Pre-generated Notes File
@@ -125,7 +125,7 @@ ggrel 1.2.0 -f release_notes.md
 The `-a` (or `--attach`) flag is repeatable. You can attach multiple asset files such as `.zip`, `.tar.gz`, and `.dmg`:
 
 ```bash
-gemini-release-notes 1.2.0 | ggrel 1.2.0 \
+gemini-release-notes | ggrel 1.2.0 \
   --test-cmd "npm test" \
   --build-cmd "npm run build" \
   -a dist/app-1.2.0.zip \
@@ -136,7 +136,7 @@ gemini-release-notes 1.2.0 | ggrel 1.2.0 \
 You can also use the `${target_version}` placeholder in artifact paths, which dynamically resolves to the target release version:
 
 ```bash
-gemini-release-notes 1.2.0 | ggrel 1.2.0 \
+gemini-release-notes | ggrel 1.2.0 \
   --test-cmd "make test" \
   --build-cmd "make build" \
   -a "dist/app-${target_version}.zip" \

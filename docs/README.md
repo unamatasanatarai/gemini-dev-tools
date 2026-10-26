@@ -30,7 +30,7 @@ All utilities that generate text from the Gemini API delegate execution to [`gem
 ### 2. Composable Release Pipeline
 Releases are designed as a two-stage UNIX pipeline:
 ```bash
-gemini-release-notes 1.2.0 | ggrel 1.2.0
+gemini-release-notes | ggrel 1.2.0
 ```
 - **Stage 1 ([`gemini-release-notes`](gemini-release-notes.md))**: Focuses strictly on synthesizing commits and file changes into GitHub-flavored Markdown.
 - **Stage 2 ([`ggrel`](ggrel.md))**: Focuses on verification, dry runs, interactive confirmation, running tests/builds, tagging, git pushes, and GitHub release publication.

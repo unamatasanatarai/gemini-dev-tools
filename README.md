@@ -216,11 +216,11 @@ The release pipeline is split into two composable commands:
 Analyzes commits between the previous release tag and current `HEAD`, synthesizes changes using Gemini with fallback model rotation, and outputs structured Markdown release notes to stdout:
 
 ```bash
-# Output release notes for a target version to stdout
-gemini-release-notes 1.2.0
+# Output release notes for unreleased commits to stdout
+gemini-release-notes
 
 # Redirect to a file via shell redirection
-gemini-release-notes 1.2.0 > release_notes.md
+gemini-release-notes > release_notes.md
 ```
 
 #### Step 2: Publish Release (`ggrel`)
@@ -229,14 +229,14 @@ Takes release notes generated in Step 1, runs test/build hooks, bumps the versio
 
 ```bash
 # Pipe directly from gemini-release-notes
-gemini-release-notes 1.2.0 | ggrel 1.2.0
+gemini-release-notes | ggrel 1.2.0
 
 # Provide pre-generated notes via file or inline argument
 ggrel 1.2.0 -f release_notes.md
 ggrel 1.2.0 --notes "### Features\n- New capability"
 
 # Preview release actions without altering repository state
-gemini-release-notes 1.2.0 | ggrel 1.2.0 --dry-run
+gemini-release-notes | ggrel 1.2.0 --dry-run
 
 # Attach release assets
 ggrel 1.2.0 -f release_notes.md -a dist/bundle.tar.gz

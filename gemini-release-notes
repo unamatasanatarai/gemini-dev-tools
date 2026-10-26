@@ -30,11 +30,10 @@ info() {
 
 usage() {
     printf 'Usage:\n'
-    printf '  gemini-release-notes <version>\n\n'
-    printf 'Arguments:\n'
-    printf '  <version>              Target release version (e.g. 1.0.1 or v1.0.1).\n\n'
+    printf '  gemini-release-notes\n\n'
+    printf 'Generates categorized Markdown release notes comparing the latest git tag against HEAD.\n\n'
     printf 'Options:\n'
-    printf '  -h, --help             Show this help message.\n'
+    printf '  -h, --help  Show this help message.\n'
 }
 
 for dep in git curl jq; do
@@ -53,8 +52,6 @@ if [[ -z "${repo_root}" || ! -d "${repo_root}" ]]; then
 fi
 cd "${repo_root}" || die "Failed to enter git repository root."
 
-target_version=""
-
 while [[ $# -gt 0 ]]; do
     case "$1" in
     -h | --help)
@@ -65,25 +62,11 @@ while [[ $# -gt 0 ]]; do
         die "Unknown option: $1"
         ;;
     *)
-        if [[ -z "${target_version}" ]]; then
-            target_version="$1"
-            shift
-        else
-            die "Unexpected extra positional argument: $1"
-        fi
+        die "Unexpected argument: $1"
         ;;
     esac
+    shift
 done
-
-if [[ -z "${target_version}" ]]; then
-    die "Specify a version number (e.g. gemini-release-notes 1.0.1)"
-fi
-
-target_version="${target_version#v}"
-
-if [[ ! "${target_version}" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
-    die "Invalid target version: \"${target_version}\". Expected semver e.g. 1.0.1"
-fi
 
 app_name="${repo_root##*/}"
 
@@ -139,7 +122,7 @@ if [[ -n "${repo_web_url}" ]]; then
 fi
 
 printf '%s\n' \
-    "You write concise, factual, high-quality software release notes for ${app_name} v${target_version}." \
+    "You write concise, factual, high-quality software release notes for ${app_name}." \
     "" \
     "Below is the full list of commits and file changes included in this release." \
     "Write a clear, structured release summary in GitHub-flavored Markdown." \
