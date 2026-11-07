@@ -16,7 +16,8 @@ Welcome to the detailed documentation for **gemini-dev-tools**, a modular suite 
 | [`ggic`](ggic.md) | Git & Commits | Automated Git workflow: stage changes, generate commit message, review, and commit | [ggic.md](ggic.md) |
 | [`ggicp`](ggicp.md) | Git & Commits | Shortcut workflow: stage changes, commit with fallback rotation, and push upstream | [ggicp.md](ggicp.md) |
 | [`gemini-release-notes`](gemini-release-notes.md) | Releases | Generates categorized Markdown release notes between previous tag and HEAD | [gemini-release-notes.md](gemini-release-notes.md) |
-| [`ggrel`](ggrel.md) | Releases | Automated release workflow: runs tests/builds, bumps version, tags, pushes, and publishes to GitHub | [ggrel.md](ggrel.md) |
+| [`grel`](grel.md) | Releases | Automated release workflow: runs tests/builds, bumps version, tags, pushes, and publishes to GitHub | [grel.md](grel.md) |
+| [`ggrel`](ggrel.md) | Releases | One-step release: generates notes, saves them to a file, and runs `grel -f` | [ggrel.md](ggrel.md) |
 
 ---
 
@@ -30,7 +31,8 @@ All utilities that generate text from the Gemini API delegate execution to [`gem
 ### 2. Composable Release Pipeline
 Releases are designed as a two-stage UNIX pipeline:
 ```bash
-gemini-release-notes | ggrel 1.2.0
+gemini-release-notes | grel 1.2.0
 ```
 - **Stage 1 ([`gemini-release-notes`](gemini-release-notes.md))**: Focuses strictly on synthesizing commits and file changes into GitHub-flavored Markdown.
-- **Stage 2 ([`ggrel`](ggrel.md))**: Focuses on verification, dry runs, interactive confirmation, running tests/builds, tagging, git pushes, and GitHub release publication.
+- **Stage 2 ([`grel`](grel.md))**: Focuses on verification, dry runs, interactive confirmation, running tests/builds, tagging, git pushes, and GitHub release publication.
+- **Both at once ([`ggrel`](ggrel.md))**: Runs stage 1 into a saved notes file, then stage 2 with `grel -f`.

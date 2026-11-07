@@ -1,6 +1,6 @@
 # `gemini-release-notes`
 
-Generates structured, factual GitHub-flavored Markdown release notes by analyzing commits and diffstats between the previous release tag and current `HEAD`. Uses fallback model rotation and outputs directly to standard output for direct review or piping into [`ggrel`](ggrel.md).
+Generates structured, factual GitHub-flavored Markdown release notes by analyzing commits and diffstats between the previous release tag and current `HEAD`. Uses fallback model rotation and outputs directly to standard output for direct review or piping into [`grel`](grel.md).
 
 ---
 
@@ -50,7 +50,7 @@ gemini-release-notes
 gemini-release-notes > release_notes.md
 ```
 
-### Pipe Directly into `ggrel`
+### Pipe Directly into `grel`
 ```bash
-gemini-release-notes | ggrel 1.2.0
+gemini-release-notes | grel 1.2.0
 ```

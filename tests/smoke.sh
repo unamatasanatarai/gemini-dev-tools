@@ -66,7 +66,7 @@ three"
     got="$(cat "${work_dir}/cfg/gemini/rotation" 2>&1)"
     [[ "${got}" == $'gemini-3.8-flash\ngemini-2.5-flash' ]] || fail "gemini-rotate-models --set: ${got}"
 
-    for tool in gemini-key gemini-list-models gemini-rotate-models gemini-prompt gemini-commit-message ggic gemini-release-notes ggrel; do
+    for tool in gemini-key gemini-list-models gemini-rotate-models gemini-prompt gemini-commit-message ggic gemini-release-notes grel ggrel; do
         XDG_CONFIG_HOME="${work_dir}/cfg" "${shell_bin}" "./${tool}" --help >/dev/null 2>&1 || fail "${tool} --help"
     done
 done

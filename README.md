@@ -17,7 +17,8 @@ A modular suite of high-performance Pure Bash CLI utilities built on the Google 
 - **Automated Conventional Commits**: Inspects staged and unstaged Git diffs (respecting `.gitignore`), and generates standards-compliant commit messages with concise subjects and technical bullet points.
 - **Ordered Model Fallback Rotation**: Automatically iterates through a user-configurable rotation list sorted from newest to oldest model versions upon HTTP 429 rate limits, service errors, or empty completions.
 - **Intelligent Release Notes (`gemini-release-notes`)**: Synthesizes commit logs and diffstats into categorized GitHub-flavored Markdown release notes with automatic commit hyperlinking and fallback model rotation.
-- **Full Release Automation (`ggrel`)**: Executes pre-release test and build hooks, bumps SemVer tags, updates version files, and publishes releases via the GitHub CLI using provided or generated release notes.
+- **Full Release Automation (`grel`)**: Executes pre-release test and build hooks, bumps SemVer tags, updates version files, and publishes releases via the GitHub CLI using provided or generated release notes.
+- **One-Step Release (`ggrel`)**: Generates release notes with Gemini, saves them to the XDG cache, and runs `grel -f` with them.
 - **Interactive Model Selection**: Inspects Gemini API capabilities, filters generation-capable models, and provides a built-in interactive checklist (keyboard and mouse) for model picking and rotation management.
 - **Pure Bash Architecture**: Implemented with flat execution flow, zero subshells in core paths, native array sorting, and elimination of unnecessary external binary forks (`awk`, `sed`, `grep`, `tr`, `mktemp`).
 
@@ -45,7 +46,8 @@ Detailed usage guides, flag definitions, and workflow examples for each utility 
 - [`ggic`](docs/ggic.md) - Interactive stage, generate, review, and commit workflow
 - [`ggicp`](docs/ggicp.md) - Commit with model rotation and push upstream
 - [`gemini-release-notes`](docs/gemini-release-notes.md) - Categorized Markdown release notes generation
-- [`ggrel`](docs/ggrel.md) - Full release automation (tests, builds, tags, pushes, and GitHub release)
+- [`grel`](docs/grel.md) - Full release automation (tests, builds, tags, pushes, and GitHub release)
+- [`ggrel`](docs/ggrel.md) - Generate release notes and run `grel` in one step
 
 ---
 
@@ -206,7 +208,7 @@ Stage, commit, and push upstream in a single command:
 ggicp
 ```
 
-### 7. Release Automation (`gemini-release-notes` & `ggrel`)
+### 7. Release Automation (`gemini-release-notes`, `grel` & `ggrel`)
 
 The release pipeline is split into two composable commands:
 
@@ -222,23 +224,32 @@ gemini-release-notes
 gemini-release-notes > release_notes.md
 ```
 
-#### Step 2: Publish Release (`ggrel`)
+#### Step 2: Publish Release (`grel`)
 
 Takes release notes generated in Step 1, runs test/build hooks, bumps the version file, creates an annotated Git tag, pushes to origin, and publishes via the GitHub CLI:
 
 ```bash
 # Pipe directly from gemini-release-notes
-gemini-release-notes | ggrel 1.2.0
+gemini-release-notes | grel 1.2.0
 
 # Provide pre-generated notes via file or inline argument
-ggrel 1.2.0 -f release_notes.md
-ggrel 1.2.0 --notes "### Features\n- New capability"
+grel 1.2.0 -f release_notes.md
+grel 1.2.0 --notes "### Features\n- New capability"
 
 # Preview release actions without altering repository state
-gemini-release-notes | ggrel 1.2.0 --dry-run
+gemini-release-notes | grel 1.2.0 --dry-run
 
 # Attach release assets
-ggrel 1.2.0 -f release_notes.md -a dist/bundle.tar.gz
+grel 1.2.0 -f release_notes.md -a dist/bundle.tar.gz
+```
+
+#### One Step (`ggrel`)
+
+Runs both steps: generates notes, saves them to `${XDG_CACHE_HOME:-~/.cache}/gemini/release-notes/<repo>.md`, then calls `grel -f` with that file. Other arguments are passed through to `grel`:
+
+```bash
+ggrel 1.2.0
+ggrel 1.2.0 --dry-run
 ```
 
 ---

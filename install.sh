@@ -14,6 +14,7 @@ files=(
     "ggic"
     "ggicp"
     "gemini-release-notes"
+    "grel"
     "ggrel"
 )
 
@@ -111,7 +112,8 @@ printf '%s\n' \
     '  ggic                   - Auto-stage, fallback-rotate models, and commit' \
     '  ggicp                  - Auto-stage, fallback-rotate models, commit, and push' \
     '  gemini-release-notes   - Generate categorized Markdown release notes with Gemini' \
-    '  ggrel                  - Automated release workflow: test, bump version, tag, and publish' \
+    '  grel                   - Automated release workflow: test, bump version, tag, and publish' \
+    '  ggrel                  - Generate release notes with Gemini, then run grel' \
     '' \
     'quick start:' \
     '  1. Store your API key:' \
