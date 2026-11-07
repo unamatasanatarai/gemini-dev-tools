@@ -9,8 +9,9 @@ fi
 source "${common_file}"
 
 action="${1:-}"
-shift
+(($#)) && shift
 new_list=()
+interactive=0
 
 case "${action}" in
 -h | --help | help)
@@ -22,7 +23,8 @@ case "${action}" in
         'strictly ordered from NEWEST to OLDEST.' \
         '' \
         'Commands & Options:' \
-        '  (no args)             Interactive selection (uses fzf if available, or menu)' \
+        '  (no args)             Interactive checklist: Up/Down or mouse wheel to move,' \
+        '                        Space or click to toggle, a all/none, Enter to save, q/Esc to cancel' \
         '  --show, -s            Display current rotation list in order' \
         '  --reset               Reset rotation to recommended defaults' \
         '  --set <m1,m2,...>     Set rotation list from comma-separated names' \
@@ -54,7 +56,7 @@ case "${action}" in
     new_list=("${GEMINI_DEFAULT_ROTATION[@]}")
     ;;
 --set | set)
-    if [[ $# -eq 0 ]]; then
+    if (($# == 0)); then
         printf 'Error: --set requires a comma-separated or space-separated list of models\n' >&2
         exit 2
     fi
@@ -80,105 +82,276 @@ case "${action}" in
         exit 1
     fi
     ;;
-"" | --all) ;;
+"" | --all)
+    interactive=1
+    ;;
 *)
     printf "Error: unknown command '%s'. Run 'gemini-rotate-models --help'.\n" "${action}" >&2
     exit 2
     ;;
 esac
 
-if [[ -z "${action}" || "${action}" == "--all" ]]; then
-    available=()
+sort_in=()
+if ((interactive)); then
     if [[ -n "${GEMINI_KEY}" ]] && command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-        raw_json="$(curl -fsS --connect-timeout 15 --max-time 60 -H @<(printf 'x-goog-api-key: %s\n' "${GEMINI_KEY}") "${GEMINI_API_URL}" 2>/dev/null)"
         include_all=false
         [[ "${action}" == "--all" ]] && include_all=true
-        [[ -n "${raw_json}" ]] && model_text="$(jq -r --argjson all "${include_all}" '
+        while IFS= read -r line || [[ -n "${line}" ]]; do
+            [[ -n "${line}" ]] && sort_in+=("${line}")
+        done < <(jq -r --argjson all "${include_all}" '
             .models[]
             | select(.supportedGenerationMethods[]? == "generateContent")
             | .name | sub("^models/"; "")
             | select($all or (startswith("gemini-") and (test("tts|image|transcribe|robotics|banana|computer-use") | not)))
-        ' <<<"${raw_json}" 2>/dev/null)"
-        gemini_lines_to_array available "${model_text:-}"
+        ' < <(curl -fsS --connect-timeout 15 --max-time 60 -H @- "${GEMINI_API_URL}" 2>/dev/null <<<"x-goog-api-key: ${GEMINI_KEY}") 2>/dev/null)
     fi
-    ((${#available[@]} == 0)) && available=("${GEMINI_DEFAULT_ROTATION[@]}")
-    gemini_sort_models available
+    ((${#sort_in[@]} == 0)) && sort_in=("${GEMINI_DEFAULT_ROTATION[@]}")
+else
+    sort_in=("${new_list[@]}")
+fi
 
-    if command -v fzf >/dev/null 2>&1 && [[ -t 0 && -t 1 ]]; then
-        printf '\nLaunching interactive multi-select via fzf...\n'
-        printf 'Use TAB to select/deselect items, Shift-TAB to unselect, Enter to confirm.\n\n'
-        printf -v fzf_input '%s\n' "${available[@]}"
-        fzf_output="$(fzf --multi --reverse --height=50% \
-            --prompt="Toggle models (TAB to toggle): " \
-            --header="Rotate Models (Order enforced NEWEST -> OLDEST)" <<<"${fzf_input%$'\n'}")"
-        gemini_lines_to_array new_list "${fzf_output}"
+sort_out=()
+sort_keys=()
+for m in "${sort_in[@]}"; do
+    m="${m#"${m%%[![:space:]]*}"}"
+    m="${m%"${m##*[![:space:]]}"}"
+    [[ -z "${m}" || "${m}" == \#* ]] && continue
+    dup=0
+    for x in "${sort_out[@]}"; do
+        [[ "${x}" == "${m}" ]] && dup=1 && break
+    done
+    ((dup)) && continue
+    latest=0
+    [[ "${m}" == *-latest* ]] && latest=1
+    major=0
+    minor=0
+    if [[ "${m}" =~ ([0-9]+)(\.([0-9]+))? ]]; then
+        major=$((10#${BASH_REMATCH[1]}))
+        [[ -n "${BASH_REMATCH[3]}" ]] && minor=$((10#${BASH_REMATCH[3]}))
     fi
+    tier=0
+    case "${m}" in
+    *pro*) tier=3 ;;
+    *flash-lite*) tier=1 ;;
+    *flash*) tier=2 ;;
+    esac
+    printf -v key '%d%05d%05d%d_%s' "${latest}" "${major}" "${minor}" "${tier}" "${m}"
+    j=${#sort_out[@]}
+    while ((j > 0)) && [[ "${sort_keys[j - 1]}" < "${key}" ]]; do
+        sort_keys[j]="${sort_keys[j - 1]}"
+        sort_out[j]="${sort_out[j - 1]}"
+        ((j--))
+    done
+    sort_keys[j]="${key}"
+    sort_out[j]="${m}"
+done
 
-    if ((${#new_list[@]} == 0)); then
+if ((interactive)); then
+    available=("${sort_out[@]}")
+    total=${#available[@]}
+    sel=()
+    for i in "${!available[@]}"; do
+        sel[i]=0
+        for m in "${GEMINI_ROTATION[@]}"; do
+            [[ "${m}" == "${available[i]}" ]] && sel[i]=1 && break
+        done
+    done
+
+    if [[ -t 0 && -t 1 ]]; then
+        tui_stty="$(stty -g 2>/dev/null)"
+        trap 'printf "\033[?1006l\033[?1000l\033[?25h\033[?1049l"; [[ -n "${tui_stty}" ]] && stty "${tui_stty}" 2>/dev/null' EXIT
+        trap 'exit 130' INT TERM
+        trap 'tui_resize=1' WINCH
+        stty -echo -icanon 2>/dev/null
+        printf '\033[?1049h\033[?25l\033[?1000h\033[?1006h'
+        tui_resize=1
+        tui_cancel=0
+        cur=0
+        top=0
+        rows=24
+        width=77
+        while :; do
+            if ((tui_resize)); then
+                tui_resize=0
+                tui_size="$(stty size 2>/dev/null)"
+                if [[ "${tui_size}" =~ ^([0-9]+)\ ([0-9]+)$ ]]; then
+                    rows=${BASH_REMATCH[1]}
+                    width=$((BASH_REMATCH[2] - 3))
+                fi
+                ((width < 1)) && width=1
+            fi
+            height=$((rows - 4))
+            ((height < 1)) && height=1
+            ((cur < top)) && top=${cur}
+            ((cur >= top + height)) && top=$((cur - height + 1))
+
+            count=0
+            for i in "${!sel[@]}"; do
+                ((sel[i])) && ((count++))
+            done
+            printf '\033[HGemini model rotation (newest -> oldest)\033[K\n'
+            printf 'Up/Down/wheel move  Space/click toggle  a all/none  Enter save  q/Esc cancel\033[K\n\033[K\n'
+            for ((i = top; i < top + height && i < total; i++)); do
+                mark='[ ]'
+                ((sel[i])) && mark='[x]'
+                line="${mark} ${available[i]}"
+                prefix='  '
+                ((i == cur)) && prefix='> '
+                printf '%s%s\033[K\n' "${prefix}" "${line:0:width}"
+            done
+            printf '\033[J%d of %d selected  (%d/%d)' "${count}" "${total}" "$((cur + 1))" "${total}"
+
+            key=""
+            IFS= read -rsn1 key
+            rc=$?
+            ((rc > 128)) && continue
+            ((rc != 0)) && break
+            case "${key}" in
+            $'\033')
+                rest=""
+                IFS= read -rsn1 -t 1 rest
+                if [[ -z "${rest}" ]]; then
+                    tui_cancel=1
+                    break
+                fi
+                [[ "${rest}" == '[' || "${rest}" == 'O' ]] || continue
+                k2=""
+                IFS= read -rsn1 -t 1 k2
+                case "${k2}" in
+                A) ((cur > 0)) && ((cur--)) ;;
+                B) ((cur < total - 1)) && ((cur++)) ;;
+                H) cur=0 ;;
+                F) cur=$((total - 1)) ;;
+                5)
+                    IFS= read -rsn1 -t 1 ch
+                    cur=$((cur - height))
+                    ((cur < 0)) && cur=0
+                    ;;
+                6)
+                    IFS= read -rsn1 -t 1 ch
+                    cur=$((cur + height))
+                    ((cur > total - 1)) && cur=$((total - 1))
+                    ;;
+                '<')
+                    seq=""
+                    ch=""
+                    while IFS= read -rsn1 -t 1 ch; do
+                        [[ "${ch}" == M || "${ch}" == m ]] && break
+                        seq+="${ch}"
+                    done
+                    [[ "${seq}" =~ ^([0-9]+)\;([0-9]+)\;([0-9]+)$ ]] || continue
+                    y=${BASH_REMATCH[3]}
+                    case "${BASH_REMATCH[1]}" in
+                    64) ((cur > 0)) && ((cur--)) ;;
+                    65) ((cur < total - 1)) && ((cur++)) ;;
+                    0)
+                        [[ "${ch}" == M ]] || continue
+                        idx=$((top + y - 4))
+                        if ((y >= 4 && y < 4 + height && idx < total)); then
+                            cur=${idx}
+                            sel[cur]=$((1 - sel[cur]))
+                        fi
+                        ;;
+                    esac
+                    ;;
+                esac
+                ;;
+            ' ') sel[cur]=$((1 - sel[cur])) ;;
+            k) ((cur > 0)) && ((cur--)) ;;
+            j) ((cur < total - 1)) && ((cur++)) ;;
+            g) cur=0 ;;
+            G) cur=$((total - 1)) ;;
+            a)
+                m=0
+                ((count < total)) && m=1
+                for i in "${!sel[@]}"; do
+                    sel[i]=${m}
+                done
+                ;;
+            q | Q)
+                tui_cancel=1
+                break
+                ;;
+            '' | $'\n' | $'\r') break ;;
+            esac
+        done
+        printf '\033[?1006l\033[?1000l\033[?25h\033[?1049l'
+        [[ -n "${tui_stty}" ]] && stty "${tui_stty}" 2>/dev/null
+        trap - EXIT INT TERM WINCH
+        if ((tui_cancel)); then
+            printf 'Cancelled. Rotation unchanged.\n'
+            exit 0
+        fi
+    else
         printf '\nAvailable Models (Ordered Newest -> Oldest):\n\n'
         for i in "${!available[@]}"; do
-            mark="[ ]"
-            for m in "${GEMINI_ROTATION[@]}"; do
-                [[ "${m}" == "${available[i]}" ]] && mark="[x]" && break
-            done
+            mark='[ ]'
+            ((sel[i])) && mark='[x]'
             printf '%3d) %s %s\n' "$((i + 1))" "${mark}" "${available[i]}"
         done
         printf '\nEnter model numbers to rotate through (e.g., "1,2,4,5" or "1-6" or "all")\n'
         choice=""
         read -r -p 'Press Enter to keep current selection: ' choice
         choice="${choice//[[:space:]]/}"
-        total=${#available[@]}
         if [[ -z "${choice}" ]]; then
-            new_list=("${GEMINI_ROTATION[@]}")
-        elif [[ "${choice}" == "all" ]]; then
-            new_list=("${available[@]}")
-        else
-            IFS=',' read -r -a parts <<<"${choice}"
-            for part in "${parts[@]}"; do
-                start=0
-                end=0
-                if [[ "${part}" =~ ^([0-9]+)-([0-9]+)$ ]]; then
-                    start=$((10#${BASH_REMATCH[1]}))
-                    end=$((10#${BASH_REMATCH[2]}))
-                elif [[ "${part}" =~ ^[0-9]+$ ]]; then
-                    start=$((10#${part}))
-                    end=${start}
-                else
-                    for m in "${available[@]}"; do
-                        [[ "${m}" == "${part}" ]] && new_list+=("${m}")
-                    done
-                fi
-                ((start < 1)) && start=1
-                ((end > total)) && end=${total}
-                for ((n = start; n <= end && end > 0; n++)); do
-                    new_list+=("${available[n - 1]}")
-                done
-            done
+            printf 'Rotation unchanged.\n'
+            exit 0
         fi
+        m=0
+        [[ "${choice}" == "all" ]] && m=1
+        for i in "${!sel[@]}"; do
+            sel[i]=${m}
+        done
+        parts=()
+        ((m)) || IFS=',' read -r -a parts <<<"${choice}"
+        for part in "${parts[@]}"; do
+            start=0
+            end=0
+            if [[ "${part}" =~ ^([0-9]+)-([0-9]+)$ ]]; then
+                start=$((10#${BASH_REMATCH[1]}))
+                end=$((10#${BASH_REMATCH[2]}))
+            elif [[ "${part}" =~ ^[0-9]+$ ]]; then
+                start=$((10#${part}))
+                end=${start}
+            else
+                for i in "${!available[@]}"; do
+                    [[ "${available[i]}" == "${part}" ]] && sel[i]=1
+                done
+            fi
+            ((start < 1)) && start=1
+            ((end > total)) && end=${total}
+            for ((n = start; n <= end; n++)); do
+                sel[n - 1]=1
+            done
+        done
     fi
 
+    for i in "${!available[@]}"; do
+        ((sel[i])) && new_list+=("${available[i]}")
+    done
     if ((${#new_list[@]} == 0)); then
         printf 'No models selected. Rotation unchanged.\n'
         exit 0
     fi
+else
+    new_list=("${sort_out[@]}")
 fi
 
-gemini_sort_models new_list
 if ((${#new_list[@]} == 0)); then
     printf 'Error: no models provided to save.\n' >&2
     exit 1
 fi
 
 if [[ ! -d "${GEMINI_CONFIG_DIR}" ]]; then
-    mkdir -m 0700 -p "${GEMINI_CONFIG_DIR}"
-    if [[ $? -ne 0 ]]; then
+    mkdir -m 0700 -p "${GEMINI_CONFIG_DIR}" 2>/dev/null
+    if (($? != 0)); then
         printf 'Error: failed to create config directory: %s\n' "${GEMINI_CONFIG_DIR}" >&2
         exit 1
     fi
 fi
 
 printf '%s\n' "${new_list[@]}" 2>/dev/null >"${GEMINI_ROTATION_FILE}"
-if [[ $? -ne 0 ]]; then
+if (($? != 0)); then
     printf 'Error: failed to write rotation file: %s\n' "${GEMINI_ROTATION_FILE}" >&2
     exit 1
 fi

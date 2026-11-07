@@ -18,7 +18,7 @@ A modular suite of high-performance Pure Bash CLI utilities built on the Google 
 - **Ordered Model Fallback Rotation**: Automatically iterates through a user-configurable rotation list sorted from newest to oldest model versions upon HTTP 429 rate limits, service errors, or empty completions.
 - **Intelligent Release Notes (`gemini-release-notes`)**: Synthesizes commit logs and diffstats into categorized GitHub-flavored Markdown release notes with automatic commit hyperlinking and fallback model rotation.
 - **Full Release Automation (`ggrel`)**: Executes pre-release test and build hooks, bumps SemVer tags, updates version files, and publishes releases via the GitHub CLI using provided or generated release notes.
-- **Interactive Model Selection**: Inspects Gemini API capabilities, filters generation-capable models, and provides interactive model picking and rotation management using optional `fzf` integration with fallback terminal menus.
+- **Interactive Model Selection**: Inspects Gemini API capabilities, filters generation-capable models, and provides a built-in interactive checklist (keyboard and mouse) for model picking and rotation management.
 - **Pure Bash Architecture**: Implemented with flat execution flow, zero subshells in core paths, native array sorting, and elimination of unnecessary external binary forks (`awk`, `sed`, `grep`, `tr`, `mktemp`).
 
 ---
@@ -28,7 +28,6 @@ A modular suite of high-performance Pure Bash CLI utilities built on the Google 
 - **Runtime & Scripting**: Bash (POSIX-compliant environment targeting `#!/usr/bin/env bash`)
 - **Version Control**: Git
 - **External Dependencies**: `curl` (HTTP requests), `jq` (JSON payload handling), `gh` (optional, GitHub releases)
-- **Optional CLI Enhancements**: `fzf` (interactive fuzzy selection)
 - **API Target**: Google Gemini REST API (`v1beta` endpoint)
 - **Standards**: XDG Base Directory Specification, Conventional Commits specification
 
@@ -131,7 +130,7 @@ gemini-key run -- curl -H "x-goog-api-key: $GEMINI_API_KEY" https://generativela
 
 ### 2. Configure Model Fallback Rotation (`gemini-rotate-models`)
 
-Launch interactive model selection (supports `fzf` multi-select with `TAB` toggling):
+Launch the interactive checklist (`↑`/`↓` or mouse wheel to move, `Space` or click to toggle, `Enter` to save, `q`/`Esc` to cancel):
 
 ```bash
 gemini-rotate-models

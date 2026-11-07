@@ -16,7 +16,7 @@ gemini-rotate-models [command|options]
 
 | Command / Option | Description |
 | :--- | :--- |
-| *(no arguments)* | Launches interactive multi-select model configuration using `fzf` (if installed) or a numbered terminal menu. |
+| *(no arguments)* | Launches a full-screen interactive checklist (see [Interactive Keys](#interactive-keys)). Falls back to a numbered menu when not attached to a terminal. |
 | `-s`, `--show` | Displays the current rotation list in chronological fallback order. |
 | `--reset` | Resets the rotation list to the suite's recommended built-in defaults. |
 | `--set <m1,m2,...>` | Explicitly overwrites the rotation list using a comma-separated list of model names. Re-orders models from newest to oldest automatically. |
@@ -24,6 +24,21 @@ gemini-rotate-models [command|options]
 | `--remove <model>` | Removes an individual model from the rotation file. |
 | `--all` | Includes preview, experimental, and specialized models in the interactive picker. |
 | `-h`, `--help` | Displays usage instructions and available commands. |
+
+---
+
+## Interactive Keys
+
+Models currently in the rotation start checked.
+
+| Key / Mouse | Action |
+| :--- | :--- |
+| `↑` / `↓`, `k` / `j`, mouse wheel | Move the cursor |
+| `PgUp` / `PgDn`, `Home` / `End` (`g` / `G`) | Jump by page / to first or last |
+| `Space`, left click | Toggle the model |
+| `a` | Select all / none |
+| `Enter` | Save the checked models (sorted newest to oldest) |
+| `q`, `Esc` | Cancel without saving |
 
 ---
 
