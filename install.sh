@@ -2,6 +2,7 @@
 
 install_dir="${XDG_BIN_HOME:-${HOME:-}/.local/bin}"
 config_dir="${XDG_CONFIG_HOME:-${HOME:-}/.config}/gemini"
+repo="unamatasanatarai/gemini-dev-tools"
 
 files=(
     "gemini-common.sh"
@@ -21,23 +22,16 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
-release_tag=""
-latest_url="$(curl -sS -w "%{url_effective}" -o /dev/null -L --connect-timeout 10 --max-time 15 "https://github.com/unamatasanatarai/gemini-dev-tools/releases/latest" 2>/dev/null)"
-if [[ "${latest_url}" =~ /releases/tag/([^/]+)$ ]]; then
-    release_tag="${BASH_REMATCH[1]}"
-fi
-
-if [[ -z "${release_tag}" ]]; then
-    release_tag="master"
-fi
-
-base_url="https://raw.githubusercontent.com/unamatasanatarai/gemini-dev-tools/${release_tag}"
+latest_url="$(curl -sS -w '%{url_effective}' -o /dev/null -L --connect-timeout 10 --max-time 15 "https://github.com/${repo}/releases/latest" 2>/dev/null)"
+release_tag="master"
+[[ "${latest_url}" =~ /releases/tag/([^/]+)$ ]] && release_tag="${BASH_REMATCH[1]}"
+base_url="https://raw.githubusercontent.com/${repo}/${release_tag}"
 
 if [[ ! -d "${install_dir}" ]]; then
     mkdir -p "${install_dir}"
     if [[ $? -ne 0 ]]; then
         printf 'Error: failed to create install directory: %s\n' "${install_dir}" >&2
-        exit 1
+        exit 2
     fi
 fi
 
@@ -45,63 +39,58 @@ if [[ ! -d "${config_dir}" ]]; then
     mkdir -m 0700 -p "${config_dir}"
     if [[ $? -ne 0 ]]; then
         printf 'Error: failed to create config directory: %s\n' "${config_dir}" >&2
-        exit 1
+        exit 2
     fi
 fi
-chmod 0700 "${config_dir}" 2>/dev/null
 
 tmp_dir="${install_dir}/.gemini-install-$$"
-if [[ -d "${tmp_dir}" ]]; then
-    rm -rf "${tmp_dir}"
-fi
-
-mkdir -m 700 "${tmp_dir}"
+mkdir -m 0700 "${tmp_dir}"
 if [[ $? -ne 0 ]]; then
     printf 'Error: failed to create temporary staging directory: %s\n' "${tmp_dir}" >&2
-    exit 1
+    exit 2
 fi
-
 trap 'rm -rf "${tmp_dir}"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
+curl_args=()
+staged=()
 for file in "${files[@]}"; do
     printf 'installing %s...\n' "${file}"
-    curl \
-        --silent \
-        --show-error \
-        --fail \
-        --location \
-        --connect-timeout 10 \
-        --max-time 30 \
-        --output "${tmp_dir}/${file}" \
-        "${base_url}/${file}"
-    if [[ $? -ne 0 || ! -s "${tmp_dir}/${file}" ]]; then
-        printf 'Error: failed to download %s\n' "${file}" >&2
-        exit 1
+    curl_args+=(--output "${tmp_dir}/${file}" "${base_url}/${file}")
+    staged+=("${tmp_dir}/${file}")
+done
+
+curl --silent --show-error --fail --fail-early --location --connect-timeout 10 --max-time 120 "${curl_args[@]}"
+if [[ $? -ne 0 ]]; then
+    printf 'Error: failed to download release files from %s\n' "${base_url}" >&2
+    exit 3
+fi
+
+for file in "${staged[@]}"; do
+    if [[ ! -s "${file}" ]]; then
+        printf 'Error: failed to download %s\n' "${file##*/}" >&2
+        exit 3
     fi
 done
 
-chmod 755 "${tmp_dir}"/*
+chmod 0755 "${staged[@]}"
 if [[ $? -ne 0 ]]; then
     printf 'Error: failed to set permissions on downloaded files\n' >&2
-    exit 1
+    exit 4
 fi
 
-mv -f "${tmp_dir}"/* "${install_dir}/"
+mv -f "${staged[@]}" "${install_dir}/"
 if [[ $? -ne 0 ]]; then
     printf 'Error: failed to install files into %s\n' "${install_dir}" >&2
-    exit 1
+    exit 4
 fi
-
-rm -rf "${tmp_dir}"
-trap - EXIT INT TERM HUP
 
 for file in "${files[@]}"; do
     if [[ ! -f "${install_dir}/${file}" ]]; then
         printf 'Error: installed file missing: %s\n' "${file}" >&2
-        exit 1
+        exit 4
     fi
 done
 

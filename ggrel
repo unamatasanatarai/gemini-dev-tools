@@ -1,19 +1,6 @@
 #!/usr/bin/env bash
-# ggrel: test, bump VERSION, tag, push, and publish a GitHub release.
-# Release notes are supplied by the caller (e.g. piped from gemini-release-notes).
 
-die() {
-    printf 'Error: %s\n' "$*" >&2
-    exit 1
-}
-
-info() {
-    printf '\n==> %s\n' "$*"
-}
-
-usage() {
-    cat <<'EOF'
-Usage:
+usage='Usage:
   ggrel <version> [options]
 
 Arguments:
@@ -22,7 +9,7 @@ Arguments:
 Release Notes Options (Required):
   -f, --notes-file FILE  Read release notes from FILE (use "-" for stdin).
   --notes TEXT           Specify release notes inline as a string.
-                         Can also be piped via stdin (e.g. gemini-release-notes 1.0.1 | ggrel 1.0.1).
+                         Can also be piped via stdin (e.g. gemini-release-notes | ggrel 1.0.1).
 
 Execution Modes:
   -n, --dry-run, --preview
@@ -41,53 +28,32 @@ Configuration Hooks:
     APP_NAME, TEST_CMD, BUILD_CMD, RELEASE_ASSETS
 
   ${version} / $version (or ${target_version}) in commands and asset paths
-  are replaced with the target version.
-EOF
-}
-
-# Read one line from the user, preferring /dev/tty so piped stdin stays usable.
-# Usage: ask <var> <prompt>
-ask() {
-    local __reply=""
-    printf '%s' "$2" >&2
-    if { : </dev/tty; } 2>/dev/null; then
-        IFS= read -r __reply </dev/tty
-    elif [[ -t 0 ]]; then
-        IFS= read -r __reply
-    else
-        return 1
-    fi
-    printf -v "$1" '%s' "${__reply}"
-}
-
-# Replace version placeholders in a string.
-expand_version() {
-    local s="$1"
-    s="${s//\$\{target_version\}/${target_version}}"
-    s="${s//\$target_version/${target_version}}"
-    s="${s//\$\{version\}/${target_version}}"
-    s="${s//\$version/${target_version}}"
-    printf '%s' "${s}"
-}
+  are replaced with the target version.'
 
 for dep in git gh; do
-    command -v "${dep}" >/dev/null 2>&1 || die "Missing required dependency: ${dep}"
+    if ! command -v "${dep}" >/dev/null 2>&1; then
+        printf 'Error: Missing required dependency: %s\n' "${dep}" >&2
+        exit 10
+    fi
 done
 
-repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "Must be run inside a Git repository."
-cd "${repo_root}" || die "Failed to enter git repository root."
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+if [[ $? -ne 0 || -z "${repo_root}" ]]; then
+    printf 'Error: Must be run inside a Git repository.\n' >&2
+    exit 11
+fi
+if ! cd "${repo_root}"; then
+    printf 'Error: Failed to enter git repository root.\n' >&2
+    exit 11
+fi
 
 version_file="${repo_root}/VERSION"
-app_name=""
 target_version=""
-test_cmd=""
-build_cmd=""
 notes_file=""
 inline_notes=""
 dry_run=false
 assets=()
 
-# Optional per-repo configuration hook.
 if [[ -f .git-release.sh ]]; then
     source .git-release.sh
 elif [[ -f .release.sh ]]; then
@@ -96,13 +62,10 @@ fi
 app_name="${APP_NAME:-}"
 test_cmd="${TEST_CMD:-}"
 build_cmd="${BUILD_CMD:-}"
-if declare -p RELEASE_ASSETS >/dev/null 2>&1; then
-    assets+=("${RELEASE_ASSETS[@]}")
-fi
+declare -p RELEASE_ASSETS >/dev/null 2>&1 && assets+=("${RELEASE_ASSETS[@]}")
 
 while [[ $# -gt 0 ]]; do
     opt="$1"
-    # Normalize "--opt=value" into "--opt" "value" for options taking a value.
     case "${opt}" in
     --app-name=* | -f=* | --notes-file=* | --notes=* | --test-cmd=* | --build-cmd=* | -a=* | --attach=*)
         set -- "${opt%%=*}" "${opt#*=}" "${@:2}"
@@ -111,14 +74,17 @@ while [[ $# -gt 0 ]]; do
     esac
     case "${opt}" in
     --app-name | -f | --notes-file | --notes | --test-cmd | --build-cmd | -a | --attach)
-        [[ -n "${2:-}" ]] || die "Missing value for ${opt}"
+        if [[ -z "${2:-}" ]]; then
+            printf 'Error: Missing value for %s\n' "${opt}" >&2
+            exit 2
+        fi
         case "${opt}" in
         --app-name) app_name="$2" ;;
         -f | --notes-file) notes_file="$2" ;;
         --notes) inline_notes="$2" ;;
         --test-cmd) test_cmd="$2" ;;
         --build-cmd) build_cmd="$2" ;;
-        -a | --attach) assets+=("$2") ;;
+        *) assets+=("$2") ;;
         esac
         shift 2
         ;;
@@ -127,14 +93,18 @@ while [[ $# -gt 0 ]]; do
         shift
         ;;
     -h | --help)
-        usage
+        printf '%s\n' "${usage}"
         exit 0
         ;;
     -*)
-        die "Unknown option: ${opt}"
+        printf 'Error: Unknown option: %s\n' "${opt}" >&2
+        exit 2
         ;;
     *)
-        [[ -z "${target_version}" ]] || die "Unexpected extra positional argument: ${opt}"
+        if [[ -n "${target_version}" ]]; then
+            printf 'Error: Unexpected extra positional argument: %s\n' "${opt}" >&2
+            exit 2
+        fi
         target_version="${opt}"
         shift
         ;;
@@ -143,120 +113,176 @@ done
 
 app_name="${app_name:-${repo_root##*/}}"
 
-previous_tag="$(git describe --tags --match "v[0-9]*" --abbrev=0 HEAD 2>/dev/null ||
-    git describe --tags --abbrev=0 HEAD 2>/dev/null)"
+tty=""
+if { : </dev/tty; } 2>/dev/null; then
+    tty="/dev/tty"
+elif [[ -t 0 ]]; then
+    tty="/dev/stdin"
+fi
 
-# Release notes: --notes, then --notes-file, then piped stdin.
 notes_content=""
 if [[ -n "${inline_notes}" ]]; then
     notes_content="${inline_notes}"
 elif [[ "${notes_file}" == "-" ]]; then
-    notes_content="$(cat)"
+    IFS= read -r -d '' notes_content
 elif [[ -n "${notes_file}" ]]; then
-    [[ -f "${notes_file}" ]] || die "Release notes file not found: ${notes_file}"
-    notes_content="$(<"${notes_file}")"
+    if [[ ! -f "${notes_file}" ]]; then
+        printf 'Error: Release notes file not found: %s\n' "${notes_file}" >&2
+        exit 3
+    fi
+    IFS= read -r -d '' notes_content <"${notes_file}"
 elif [[ ! -t 0 ]]; then
-    notes_content="$(cat)"
+    IFS= read -r -d '' notes_content
 fi
+notes_content="${notes_content%"${notes_content##*[![:space:]]}"}"
 if [[ ! "${notes_content}" =~ [^[:space:]] ]]; then
-    die "Release notes are required. Provide them using -f/--notes-file <file>, --notes <text>, or pipe from 'gemini-release-notes' (e.g. gemini-release-notes 1.0.1 | ggrel 1.0.1)."
+    printf "Error: Release notes are required. Provide them using -f/--notes-file <file>, --notes <text>, or pipe from 'gemini-release-notes' (e.g. gemini-release-notes | ggrel 1.0.1).\n" >&2
+    exit 3
 fi
 
-if [[ -z "${target_version}" ]]; then
-    printf 'Previous release: %s\n' "${previous_tag:-(none)}" >&2
-    ask target_version 'Target version: '
+previous_tag="$(git describe --tags --match "v[0-9]*" --abbrev=0 HEAD 2>/dev/null || git describe --tags --abbrev=0 HEAD 2>/dev/null)"
+
+if [[ -z "${target_version}" && -n "${tty}" ]]; then
+    printf 'Previous release: %s\nTarget version: ' "${previous_tag:-(none)}" >&2
+    IFS= read -r target_version <"${tty}"
 fi
 target_version="${target_version#v}"
-[[ -n "${target_version}" ]] || die "Specify a target version (e.g. ggrel 1.0.1)."
+if [[ -z "${target_version}" ]]; then
+    printf 'Error: Specify a target version (e.g. ggrel 1.0.1).\n' >&2
+    exit 2
+fi
 if [[ ! "${target_version}" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
-    die "Invalid target version: \"${target_version}\". Expected semver e.g. 1.0.1"
+    printf 'Error: Invalid target version: "%s". Expected semver e.g. 1.0.1\n' "${target_version}" >&2
+    exit 2
 fi
 
-test_cmd="$(expand_version "${test_cmd}")"
-build_cmd="$(expand_version "${build_cmd}")"
-for i in "${!assets[@]}"; do
-    assets[i]="$(expand_version "${assets[i]}")"
+expand=("${test_cmd}" "${build_cmd}" "${assets[@]}")
+for i in "${!expand[@]}"; do
+    expand[i]="${expand[i]//\$\{target_version\}/${target_version}}"
+    expand[i]="${expand[i]//\$target_version/${target_version}}"
+    expand[i]="${expand[i]//\$\{version\}/${target_version}}"
+    expand[i]="${expand[i]//\$version/${target_version}}"
 done
+test_cmd="${expand[0]}"
+build_cmd="${expand[1]}"
+assets=("${expand[@]:2}")
 
 if [[ "${dry_run}" == false ]]; then
-    git diff --cached --quiet || die "You have staged changes. Commit or unstage them before releasing."
+    if ! git diff --cached --quiet; then
+        printf 'Error: You have staged changes. Commit or unstage them before releasing.\n' >&2
+        exit 4
+    fi
     if git show-ref --verify --quiet "refs/tags/v${target_version}"; then
-        die "Tag v${target_version} already exists."
+        printf 'Error: Tag v%s already exists.\n' "${target_version}" >&2
+        exit 4
     fi
 fi
 
-separator='--------------------------------------------------'
-printf '\n%s\n' '=================================================='
-printf 'Release preview: %s v%s\n' "${app_name}" "${target_version}"
-printf '%s\n' '=================================================='
+rule='=================================================='
+sep='--------------------------------------------------'
+printf '\n%s\nRelease preview: %s v%s\n%s\n' "${rule}" "${app_name}" "${target_version}" "${rule}"
 printf 'Previous tag:     %s\n' "${previous_tag:-(none)}"
 printf 'Target version:   v%s\n' "${target_version}"
 printf 'Version file:     %s\n' "${version_file}"
-if ((${#assets[@]} > 0)); then
-    printf 'Release assets:   %s\n' "${assets[*]}"
-fi
-printf '\nRelease notes to be published:\n%s\n%s\n%s\n\n' "${separator}" "${notes_content}" "${separator}"
+((${#assets[@]} > 0)) && printf 'Release assets:   %s\n' "${assets[*]}"
+printf '\nRelease notes to be published:\n%s\n%s\n%s\n\n' "${sep}" "${notes_content}" "${sep}"
 
 if [[ "${dry_run}" == true ]]; then
-    printf '%s\n' "[Dry run] No changes, tags, or releases were performed."
+    printf '[Dry run] No changes, tags, or releases were performed.\n'
     exit 0
 fi
 
+if [[ -z "${tty}" ]]; then
+    printf 'Error: Cannot prompt for confirmation without an interactive terminal (/dev/tty).\n' >&2
+    exit 5
+fi
 confirmation=""
-ask confirmation "Proceed with release v${target_version}? Type 'yes' to continue: " ||
-    die "Cannot prompt for confirmation without an interactive terminal (/dev/tty)."
+printf "Proceed with release v%s? Type 'yes' to continue: " "${target_version}" >&2
+IFS= read -r confirmation <"${tty}"
 if [[ "${confirmation}" != "yes" ]]; then
-    printf '%s\n' "Release cancelled. No actions were performed."
+    printf 'Release cancelled. No actions were performed.\n'
     exit 0
 fi
 
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/ggrel.XXXXXX")" || die "Failed to create temporary directory."
-trap 'rm -rf "${tmp_dir}"' EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
-trap 'exit 129' HUP
-release_notes_file="${tmp_dir}/release_notes.md"
-printf '%s\n' "${notes_content}" >"${release_notes_file}"
+current_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)"
+if [[ $? -ne 0 || -z "${current_branch}" ]]; then
+    printf 'Error: Detached HEAD: refusing to push release branch.\n' >&2
+    exit 6
+fi
 
 if [[ -n "${test_cmd}" ]]; then
-    info "Running pre-release tests: ${test_cmd}..."
-    bash -c "${test_cmd}" || die "Pre-release tests failed."
+    printf '\n==> Running pre-release tests: %s...\n' "${test_cmd}"
+    bash -c "${test_cmd}"
+    if [[ $? -ne 0 ]]; then
+        printf 'Error: Pre-release tests failed.\n' >&2
+        exit 7
+    fi
 fi
 
-info "Updating version file (${version_file})..."
-printf '%s\n' "${target_version}" >"${version_file}"
-git add "${version_file}" || die "Failed to stage ${version_file}."
+printf '\n==> Updating version file (%s)...\n' "${version_file}"
+printf '%s\n' "${target_version}" 2>/dev/null >"${version_file}"
+if [[ $? -ne 0 ]]; then
+    printf 'Error: Failed to write %s.\n' "${version_file}" >&2
+    exit 8
+fi
+git add -- "${version_file}"
+if [[ $? -ne 0 ]]; then
+    printf 'Error: Failed to stage %s.\n' "${version_file}" >&2
+    exit 8
+fi
 if ! git diff --cached --quiet -- "${version_file}"; then
-    git commit -m "chore(release): bump version to v${target_version}" || die "Failed to commit version bump."
+    git commit -m "chore(release): bump version to v${target_version}"
+    if [[ $? -ne 0 ]]; then
+        printf 'Error: Failed to commit version bump.\n' >&2
+        exit 8
+    fi
 fi
 
 if [[ -n "${build_cmd}" ]]; then
-    info "Running build command: ${build_cmd}..."
-    bash -c "${build_cmd}" || die "Release build command failed."
+    printf '\n==> Running build command: %s...\n' "${build_cmd}"
+    bash -c "${build_cmd}"
+    if [[ $? -ne 0 ]]; then
+        printf 'Error: Release build command failed.\n' >&2
+        exit 9
+    fi
 fi
 
 for asset in "${assets[@]}"; do
-    [[ -f "${asset}" ]] || die "Expected release asset was not found: ${asset}"
+    if [[ ! -f "${asset}" ]]; then
+        printf 'Error: Expected release asset was not found: %s\n' "${asset}" >&2
+        exit 9
+    fi
 done
 
-current_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null)" ||
-    die "Detached HEAD: refusing to push release branch."
+printf '\n==> Creating annotated tag v%s...\n' "${target_version}"
+git tag -a "v${target_version}" -m "Release ${app_name} v${target_version}"
+if [[ $? -ne 0 ]]; then
+    printf 'Error: Failed to create git tag v%s.\n' "${target_version}" >&2
+    exit 12
+fi
 
-info "Creating annotated tag v${target_version}..."
-git tag -a "v${target_version}" -m "Release ${app_name} v${target_version}" ||
-    die "Failed to create git tag v${target_version}."
+printf '\n==> Pushing branch %s...\n' "${current_branch}"
+git push origin "${current_branch}"
+if [[ $? -ne 0 ]]; then
+    printf 'Error: Failed to push branch %s to origin.\n' "${current_branch}" >&2
+    exit 13
+fi
 
-info "Pushing branch ${current_branch}..."
-git push origin "${current_branch}" || die "Failed to push branch ${current_branch} to origin."
+printf '\n==> Pushing tag v%s...\n' "${target_version}"
+git push origin "v${target_version}"
+if [[ $? -ne 0 ]]; then
+    printf 'Error: Failed to push tag v%s to origin.\n' "${target_version}" >&2
+    exit 13
+fi
 
-info "Pushing tag v${target_version}..."
-git push origin "v${target_version}" || die "Failed to push tag v${target_version} to origin."
-
-info "Publishing GitHub release v${target_version} via gh..."
+printf '\n==> Publishing GitHub release v%s via gh...\n' "${target_version}"
 gh release create "v${target_version}" \
     --title "${app_name} v${target_version}" \
-    --notes-file "${release_notes_file}" \
-    "${assets[@]}" ||
-    die "Failed to publish GitHub release via gh."
+    --notes-file - \
+    "${assets[@]}" <<<"${notes_content}"
+if [[ $? -ne 0 ]]; then
+    printf 'Error: Failed to publish GitHub release via gh.\n' >&2
+    exit 14
+fi
 
-info "Release v${target_version} successfully completed!"
+printf '\n==> Release v%s successfully completed!\n' "${target_version}"

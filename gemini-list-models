@@ -1,78 +1,53 @@
 #!/usr/bin/env bash
 
-script_path="${BASH_SOURCE[0]:-}"
-script_dir=""
-
-if [[ "${script_path}" == */* ]]; then
-    script_dir="${script_path%/*}"
+common_file="${XDG_BIN_HOME:-${HOME:-}/.local/bin}/gemini-common.sh"
+[[ "${BASH_SOURCE[0]}" == */* && -f "${BASH_SOURCE[0]%/*}/gemini-common.sh" ]] && common_file="${BASH_SOURCE[0]%/*}/gemini-common.sh"
+if [[ ! -f "${common_file}" ]]; then
+    printf 'Error: gemini-common.sh not found\n' >&2
+    exit 10
 fi
+source "${common_file}"
 
-if [[ -n "${script_dir}" && -f "${script_dir}/gemini-common.sh" ]]; then
-    source "${script_dir}/gemini-common.sh"
-elif [[ -f "${XDG_BIN_HOME:-${HOME:-}/.local/bin}/gemini-common.sh" ]]; then
-    source "${XDG_BIN_HOME:-${HOME:-}/.local/bin}/gemini-common.sh"
-fi
+case "${1:-}" in
+"") ;;
+-h | --help)
+    printf 'Usage: gemini-list-models\n\n'
+    printf 'List available generation-capable Gemini models (sorted from newest to oldest).\n'
+    exit 0
+    ;;
+*)
+    printf 'Error: unknown option: %s\n' "$1" >&2
+    printf 'Usage: gemini-list-models [-h|--help]\n' >&2
+    exit 2
+    ;;
+esac
 
-while [[ $# -gt 0 ]]; do
-    case "$1" in
-    -h | --help)
-        printf 'Usage: gemini-list-models\n\n'
-        printf 'List available generation-capable Gemini models (sorted from newest to oldest).\n'
-        exit 0
-        ;;
-    *)
-        printf 'Error: unknown option: %s\n' "$1" >&2
-        printf 'Usage: gemini-list-models [-h|--help]\n' >&2
-        exit 2
-        ;;
-    esac
-    shift
+for dep in curl jq; do
+    if ! command -v "${dep}" >/dev/null 2>&1; then
+        printf 'Error: missing dependency: %s\n' "${dep}" >&2
+        exit 1
+    fi
 done
 
-if ! command -v curl >/dev/null 2>&1; then
-    printf 'Error: missing dependency: curl\n' >&2
-    exit 1
-fi
-
-if ! command -v jq >/dev/null 2>&1; then
-    printf 'Error: missing dependency: jq\n' >&2
-    exit 1
-fi
-
-api_key=""
-if declare -F gemini_get_api_key >/dev/null 2>&1; then
-    api_key="$(gemini_get_api_key 2>/dev/null)"
-else
-    api_key="${GEMINI_API_KEY:-${GOOGLE_API_KEY:-}}"
-fi
-
-if [[ -z "${api_key}" ]]; then
+if [[ -z "${GEMINI_KEY}" ]]; then
     printf 'Error: GEMINI_API_KEY is not set or configured\n' >&2
     printf "Run 'gemini-key set' or set GEMINI_API_KEY environment variable.\n" >&2
     exit 3
 fi
 
-raw_json="$(curl -fsS -H "x-goog-api-key: ${api_key}" "https://generativelanguage.googleapis.com/v1beta/models" 2>/dev/null)"
+raw_json="$(curl -fsS --connect-timeout 15 --max-time 60 -H "x-goog-api-key: ${GEMINI_KEY}" "${GEMINI_API_URL}" 2>/dev/null)"
 if [[ $? -ne 0 || -z "${raw_json}" ]]; then
     printf 'Error: failed to query models from Gemini API\n' >&2
     exit 4
 fi
 
-models=()
-while IFS= read -r line || [[ -n "${line}" ]]; do
-    [[ -n "${line}" ]] && models+=("${line}")
-done < <(jq -r '.models[] | select(.supportedGenerationMethods[]? == "generateContent") | .name | sub("^models/"; "")' <<<"${raw_json}")
-
-if [[ ${#models[@]} -eq 0 ]]; then
-    exit 0
+model_text="$(jq -r '.models[] | select(.supportedGenerationMethods[]? == "generateContent") | .name | sub("^models/"; "")' <<<"${raw_json}" 2>/dev/null)"
+if [[ $? -ne 0 ]]; then
+    printf 'Error: failed to parse models response\n' >&2
+    exit 4
 fi
+mapfile -t models <<<"${model_text}"
 
-if declare -F gemini_sort_models_newest_to_oldest >/dev/null 2>&1; then
-    for m in "${models[@]}"; do
-        printf '%s\n' "${m}"
-    done | gemini_sort_models_newest_to_oldest
-else
-    for m in "${models[@]}"; do
-        printf '%s\n' "${m}"
-    done
-fi
+gemini_sort_models models
+((${#models[@]} > 0)) && printf '%s\n' "${models[@]}"
+exit 0

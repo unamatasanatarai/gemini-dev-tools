@@ -40,12 +40,12 @@ gemini-commit-message
 
 | Code | Meaning |
 | :--- | :--- |
-| `0` | Commit message generated successfully |
+| `0` | Commit message generated successfully, or no changes found |
 | `2` | Invalid CLI arguments |
-| `3` | Working tree is clean (no staged or unstaged changes) |
-| `4` | Not inside a Git repository |
-| `10` | Missing required dependencies (`git`, `curl`, or `jq`) |
-| `11` | Gemini API key is missing or invalid |
+| `10` | Missing required dependencies (`git`, `gemini-prompt`, `curl`, or `jq`) |
+| `11` | Failed to build the API request payload |
+| `12` | Gemini API key is missing |
+| `13` | Not inside a Git repository |
 | `19` | All fallback models failed to generate a commit message |
 
 ---
