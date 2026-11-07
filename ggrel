@@ -52,18 +52,12 @@ target_version=""
 notes_file=""
 inline_notes=""
 dry_run=false
-assets=()
+app_name=""
+test_cmd=""
+build_cmd=""
+cli_assets=()
 
-if [[ -f .git-release.sh ]]; then
-    source .git-release.sh
-elif [[ -f .release.sh ]]; then
-    source .release.sh
-fi
-app_name="${APP_NAME:-}"
-test_cmd="${TEST_CMD:-}"
-build_cmd="${BUILD_CMD:-}"
-declare -p RELEASE_ASSETS >/dev/null 2>&1 && assets+=("${RELEASE_ASSETS[@]}")
-
+# Parse arguments before loading the repository hook so --help and usage errors never execute repo code.
 while [[ $# -gt 0 ]]; do
     opt="$1"
     case "${opt}" in
@@ -84,7 +78,7 @@ while [[ $# -gt 0 ]]; do
         --notes) inline_notes="$2" ;;
         --test-cmd) test_cmd="$2" ;;
         --build-cmd) build_cmd="$2" ;;
-        *) assets+=("$2") ;;
+        *) cli_assets+=("$2") ;;
         esac
         shift 2
         ;;
@@ -110,6 +104,32 @@ while [[ $# -gt 0 ]]; do
         ;;
     esac
 done
+
+# Load the hook in a subshell and import only its documented variables, so it cannot alter ggrel's own state.
+hook_file=""
+if [[ -f .git-release.sh ]]; then
+    hook_file=".git-release.sh"
+elif [[ -f .release.sh ]]; then
+    hook_file=".release.sh"
+fi
+APP_NAME=""
+TEST_CMD=""
+BUILD_CMD=""
+RELEASE_ASSETS=()
+if [[ -n "${hook_file}" ]]; then
+    printf '==> Loading release hook: %s\n' "${repo_root}/${hook_file}" >&2
+    hook_vars="$(
+        unset APP_NAME TEST_CMD BUILD_CMD RELEASE_ASSETS
+        source "./${hook_file}" >&2
+        builtin declare -p APP_NAME TEST_CMD BUILD_CMD RELEASE_ASSETS 2>/dev/null
+        exit 0
+    )"
+    eval "${hook_vars}"
+fi
+app_name="${app_name:-${APP_NAME:-}}"
+test_cmd="${test_cmd:-${TEST_CMD:-}}"
+build_cmd="${build_cmd:-${BUILD_CMD:-}}"
+assets=("${RELEASE_ASSETS[@]}" "${cli_assets[@]}")
 
 app_name="${app_name:-${repo_root##*/}}"
 
@@ -168,8 +188,8 @@ build_cmd="${expand[1]}"
 assets=("${expand[@]:2}")
 
 if [[ "${dry_run}" == false ]]; then
-    if ! git diff --cached --quiet; then
-        printf 'Error: You have staged changes. Commit or unstage them before releasing.\n' >&2
+    if [[ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+        printf 'Error: You have uncommitted changes to tracked files. Commit or stash them before releasing.\n' >&2
         exit 4
     fi
     if git show-ref --verify --quiet "refs/tags/v${target_version}"; then

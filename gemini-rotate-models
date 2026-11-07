@@ -90,7 +90,7 @@ esac
 if [[ -z "${action}" || "${action}" == "--all" ]]; then
     available=()
     if [[ -n "${GEMINI_KEY}" ]] && command -v curl >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
-        raw_json="$(curl -fsS --connect-timeout 15 --max-time 60 -H "x-goog-api-key: ${GEMINI_KEY}" "${GEMINI_API_URL}" 2>/dev/null)"
+        raw_json="$(curl -fsS --connect-timeout 15 --max-time 60 -H @<(printf 'x-goog-api-key: %s\n' "${GEMINI_KEY}") "${GEMINI_API_URL}" 2>/dev/null)"
         include_all=false
         [[ "${action}" == "--all" ]] && include_all=true
         [[ -n "${raw_json}" ]] && model_text="$(jq -r --argjson all "${include_all}" '
@@ -99,7 +99,7 @@ if [[ -z "${action}" || "${action}" == "--all" ]]; then
             | .name | sub("^models/"; "")
             | select($all or (startswith("gemini-") and (test("tts|image|transcribe|robotics|banana|computer-use") | not)))
         ' <<<"${raw_json}" 2>/dev/null)"
-        [[ -n "${model_text:-}" ]] && mapfile -t available <<<"${model_text}"
+        gemini_lines_to_array available "${model_text:-}"
     fi
     ((${#available[@]} == 0)) && available=("${GEMINI_DEFAULT_ROTATION[@]}")
     gemini_sort_models available
@@ -111,18 +111,16 @@ if [[ -z "${action}" || "${action}" == "--all" ]]; then
         fzf_output="$(fzf --multi --reverse --height=50% \
             --prompt="Toggle models (TAB to toggle): " \
             --header="Rotate Models (Order enforced NEWEST -> OLDEST)" <<<"${fzf_input%$'\n'}")"
-        [[ -n "${fzf_output}" ]] && mapfile -t new_list <<<"${fzf_output}"
+        gemini_lines_to_array new_list "${fzf_output}"
     fi
 
     if ((${#new_list[@]} == 0)); then
-        declare -A current=()
-        for m in "${GEMINI_ROTATION[@]}"; do
-            current["${m}"]=1
-        done
         printf '\nAvailable Models (Ordered Newest -> Oldest):\n\n'
         for i in "${!available[@]}"; do
             mark="[ ]"
-            [[ -n "${current[${available[i]}]:-}" ]] && mark="[x]"
+            for m in "${GEMINI_ROTATION[@]}"; do
+                [[ "${m}" == "${available[i]}" ]] && mark="[x]" && break
+            done
             printf '%3d) %s %s\n' "$((i + 1))" "${mark}" "${available[i]}"
         done
         printf '\nEnter model numbers to rotate through (e.g., "1,2,4,5" or "1-6" or "all")\n'

@@ -1,6 +1,8 @@
 # `ggic`
 
-Interactive Git commit workflow automation tool. Stages changes, generates a Conventional Commit message via [`gemini-commit-message`](gemini-commit-message.md), lets you review or edit the message in your preferred `$EDITOR`, and commits.
+Non-interactive Git commit workflow automation tool. Stages changes, generates a Conventional Commit message via [`gemini-commit-message`](gemini-commit-message.md), prints it, and commits immediately — there is no review or edit step.
+
+> **Note:** By default `ggic` runs `git add --all`, so untracked files (including any secrets not covered by `.gitignore`) are committed **and** their contents are sent to the Gemini API as part of the diff. Use `--staged-only` to control exactly what is committed and sent. To change a generated message afterwards, use `git commit --amend` (before pushing).
 
 ---
 
@@ -27,11 +29,27 @@ ggic [options]
 1. **Pre-flight Checks**: Confirms that `git` is available, the working directory is inside a Git repository, and that changes exist.
 2. **Auto-staging**: Runs `git add --all` unless `--staged-only` is provided.
 3. **Generation**: Invokes `gemini-commit-message` with fallback rotation across configured models.
-4. **Interactive Review**:
-   - Displays the generated commit message.
-   - If running in a terminal, prompts you to accept `[y]`, edit in `$EDITOR` `[e]`, regenerate `[r]`, or abort `[n]`.
-5. **Commit**: Runs `git commit -F <message_file>`.
-6. **Push (Optional)**: If `--push` was specified, executes `git push origin <current_branch>`.
+4. **Display**: Prints the generated commit message (no confirmation prompt).
+5. **Commit**: Runs `git commit -F -` with the generated message.
+6. **Push (Optional)**: If `--push` was specified, executes `git push -u origin <current_branch>`.
+
+---
+
+## Exit Codes
+
+| Code | Meaning |
+| :--- | :--- |
+| `0` | Committed (and pushed, with `--push`), or nothing to commit. |
+| `2` | Invalid arguments. |
+| `4` | Not inside a Git repository. |
+| `5` | `--push` requested on a detached `HEAD`. |
+| `6` | `git add` failed. |
+| `7` | Commit message generation failed (see stderr for the underlying cause). |
+| `8` | Generated commit message was empty. |
+| `9` | `git commit` failed. |
+| `10` | `git push` failed. |
+| `11` | `gemini-commit-message` not found. |
+| `12` | `git` missing, or the Gemini API key is missing or was rejected. |
 
 ---
 

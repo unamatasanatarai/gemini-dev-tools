@@ -4,11 +4,11 @@
 
 APP_NAME="gemini-dev-tools"
 
-# Pre-release tests: syntax check all shell scripts
-TEST_CMD='for f in gemini-* gg* install.sh; do [[ -f "$f" ]] && bash -n "$f"; done'
+# Pre-release tests: syntax check plus runtime smoke tests (also under macOS /bin/bash 3.2 when present)
+TEST_CMD='bash tests/smoke.sh'
 
-# Build command: bundle suite scripts, installer, and documentation into release tarball
-BUILD_CMD='tar -czf "gemini-dev-tools-${target_version}.tar.gz" gemini-* gg* install.sh LICENSE README.md'
+# Build command: archive the committed suite scripts, installer, and documentation (never the working tree)
+BUILD_CMD='git archive --format=tar.gz -o "gemini-dev-tools-${target_version}.tar.gz" HEAD -- "gemini-*" "gg*" install.sh LICENSE README.md'
 
 # Assets to attach to the GitHub Release
 RELEASE_ASSETS=(

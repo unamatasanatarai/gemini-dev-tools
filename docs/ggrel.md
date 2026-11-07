@@ -58,6 +58,8 @@ ggrel <version> [options]
 
 Instead of repeatedly specifying CLI options for every release, you can create a `.release.sh` (or `.git-release.sh`) file in the root of the repository. `ggrel` automatically sources this file if present.
 
+The hook is executable code: only run `ggrel` (including `--dry-run`) in repositories you trust. `ggrel --help` and invocations with invalid arguments never load the hook. The hook is sourced in a subshell (its output goes to stderr) and only the variables listed below are imported, so it cannot alter `ggrel`'s internal state.
+
 Supported variables:
 - `APP_NAME`: Application name used in release titles and tags.
 - `TEST_CMD`: Shell command for pre-release test execution.
@@ -69,14 +71,16 @@ Example `.release.sh`:
 #!/usr/bin/env bash
 APP_NAME="my-app"
 TEST_CMD="npm test"
-BUILD_CMD='tar -czf "dist/my-app-${target_version}.tar.gz" build/'
+BUILD_CMD='git archive --format=tar.gz -o "dist/my-app-${target_version}.tar.gz" HEAD'
 RELEASE_ASSETS=(
     'dist/my-app-${target_version}.tar.gz'
     "install.sh"
 )
 ```
 
-Command-line flags always take precedence over values defined in the configuration hook.
+Command-line flags always take precedence over values defined in the configuration hook (`--attach` assets are appended to `RELEASE_ASSETS`).
+
+Prefer building archives from the commit (`git archive … HEAD`) rather than globbing the working tree: globs such as `my-app-*` also match previously built archives and untracked files.
 
 ---
 
@@ -90,7 +94,7 @@ Command-line flags always take precedence over values defined in the configurati
 
 ## Mandatory Confirmation & Safety Guards
 
-1. **Clean Worktree**: Checks for staged changes before mutating repository state (`git diff --cached --quiet`).
+1. **Clean Worktree**: Refuses to release when tracked files have staged or unstaged changes (`git status --porcelain --untracked-files=no`), so built artifacts match the tagged commit.
 2. **Tag Existence**: Confirms tag `v<version>` does not already exist.
 3. **Interactive Confirmation**: Always prompts for user confirmation (`Proceed with release v<version>? Type 'yes' to continue: `) unless running in `--dry-run`. Even when release notes are piped from stdin, `ggrel` safely reads confirmation from `/dev/tty`.
 4. **Mandatory GitHub & Git Push**: Creating annotated tags, pushing branches/tags to `origin`, and creating GitHub releases via `gh` are always performed.

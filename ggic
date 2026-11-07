@@ -66,12 +66,13 @@ fi
 message="$("${generator}")"
 generator_status=$?
 if [[ ${generator_status} -eq 12 ]]; then
-    printf 'Error: GEMINI_API_KEY is not set or configured\n' >&2
+    printf 'Error: Gemini API key is missing or was rejected\n' >&2
     exit 12
 fi
 if [[ ${generator_status} -ne 0 ]]; then
+    # Map to a single ggic code: generator codes overlap with ggic's own (e.g. 10 = push failed here).
     printf 'Error: commit message generator failed with status %d\n' "${generator_status}" >&2
-    exit "${generator_status}"
+    exit 7
 fi
 
 message="${message#"${message%%[![:space:]]*}"}"

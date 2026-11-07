@@ -35,7 +35,7 @@ if [[ -z "${GEMINI_KEY}" ]]; then
     exit 3
 fi
 
-raw_json="$(curl -fsS --connect-timeout 15 --max-time 60 -H "x-goog-api-key: ${GEMINI_KEY}" "${GEMINI_API_URL}" 2>/dev/null)"
+raw_json="$(curl -fsS --connect-timeout 15 --max-time 60 -H @<(printf 'x-goog-api-key: %s\n' "${GEMINI_KEY}") "${GEMINI_API_URL}" 2>/dev/null)"
 if [[ $? -ne 0 || -z "${raw_json}" ]]; then
     printf 'Error: failed to query models from Gemini API\n' >&2
     exit 4
@@ -46,7 +46,8 @@ if [[ $? -ne 0 ]]; then
     printf 'Error: failed to parse models response\n' >&2
     exit 4
 fi
-mapfile -t models <<<"${model_text}"
+models=()
+gemini_lines_to_array models "${model_text}"
 
 gemini_sort_models models
 ((${#models[@]} > 0)) && printf '%s\n' "${models[@]}"

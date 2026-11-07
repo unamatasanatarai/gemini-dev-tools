@@ -41,7 +41,7 @@ _gc_legacy_key="${XDG_CONFIG_HOME:-${HOME:-}/.config}/gemini-commit-message/key"
 if [[ -z "${GEMINI_KEY}" && -f "${_gc_legacy_key}" && ! -f "${GEMINI_CRED_FILE}" ]]; then
     [[ -d "${GEMINI_CONFIG_DIR}" ]] || mkdir -m 0700 -p "${GEMINI_CONFIG_DIR}" 2>/dev/null
     IFS= read -r _gc_line <"${_gc_legacy_key}"
-    printf '%s\n' "${_gc_line}" 2>/dev/null >"${GEMINI_CRED_FILE}" && chmod 0600 "${GEMINI_CRED_FILE}" 2>/dev/null
+    (umask 077 && printf '%s\n' "${_gc_line}" >"${GEMINI_CRED_FILE}") 2>/dev/null
 fi
 if [[ -z "${GEMINI_KEY}" && -f "${GEMINI_CRED_FILE}" ]]; then
     IFS= read -r GEMINI_KEY <"${GEMINI_CRED_FILE}"
@@ -51,16 +51,22 @@ GEMINI_KEY="${GEMINI_KEY#"${GEMINI_KEY%%[![:space:]]*}"}"
 GEMINI_KEY="${GEMINI_KEY%"${GEMINI_KEY##*[![:space:]]}"}"
 unset _gc_line _gc_legacy_key
 
+# Sorts the named array in place (newest -> oldest), dropping blanks, comments and duplicates.
+# Bash 3.2 compatible: no namerefs or associative arrays.
 gemini_sort_models() {
-    local -n _gs_list="$1"
+    [[ "${1:-}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+    local _gs_ref="$1[@]"
     local -a _gs_items=() _gs_keys=()
-    local -A _gs_seen=()
-    local _gs_m="" _gs_key="" _gs_latest=0 _gs_major=0 _gs_minor=0 _gs_tier=0 _gs_j=0 _gs_n=0
-    for _gs_m in "${_gs_list[@]}"; do
+    local _gs_m="" _gs_x="" _gs_dup=0 _gs_key="" _gs_latest=0 _gs_major=0 _gs_minor=0 _gs_tier=0 _gs_j=0 _gs_n=0
+    for _gs_m in "${!_gs_ref}"; do
         _gs_m="${_gs_m#"${_gs_m%%[![:space:]]*}"}"
         _gs_m="${_gs_m%"${_gs_m##*[![:space:]]}"}"
-        [[ -z "${_gs_m}" || "${_gs_m}" == \#* || -n "${_gs_seen[${_gs_m}]:-}" ]] && continue
-        _gs_seen["${_gs_m}"]=1
+        [[ -z "${_gs_m}" || "${_gs_m}" == \#* ]] && continue
+        _gs_dup=0
+        for _gs_x in "${_gs_items[@]}"; do
+            [[ "${_gs_x}" == "${_gs_m}" ]] && _gs_dup=1 && break
+        done
+        ((_gs_dup)) && continue
         _gs_latest=0
         [[ "${_gs_m}" == *-latest* ]] && _gs_latest=1
         _gs_major=0
@@ -86,5 +92,14 @@ gemini_sort_models() {
         _gs_keys[_gs_j]="${_gs_key}"
         _gs_items[_gs_j]="${_gs_m}"
     done
-    _gs_list=("${_gs_items[@]}")
+    eval "$1=(\"\${_gs_items[@]}\")"
+}
+
+# Appends non-empty lines of $2 to the named array $1 (Bash 3.2 replacement for mapfile).
+gemini_lines_to_array() {
+    [[ "${1:-}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+    local _gl_line=""
+    while IFS= read -r _gl_line || [[ -n "${_gl_line}" ]]; do
+        [[ -n "${_gl_line}" ]] && eval "$1+=(\"\${_gl_line}\")"
+    done <<<"${2:-}"
 }

@@ -105,16 +105,31 @@ for model in "${models[@]}"; do
     printf 'Attempting model: %s...\n' "${model}" >&2
     response="$(curl -sS -w $'\n%{http_code}' --connect-timeout 15 --max-time 180 \
         -X POST "${GEMINI_API_URL}/${model}:generateContent" \
-        -H "x-goog-api-key: ${GEMINI_KEY}" \
+        -H @<(printf 'x-goog-api-key: %s\n' "${GEMINI_KEY}") \
         -H "Content-Type: application/json" \
         --data-binary @- <<<"${request_json}" 2>/dev/null)"
     http_status="${response##*$'\n'}"
+    body="${response%$'\n'*}"
+    [[ "${response}" == *$'\n'* ]] || body=""
     [[ "${http_status}" =~ ^[0-9]{3}$ ]] || http_status="000"
     if [[ "${http_status}" != "200" ]]; then
-        printf 'Warning: Model %s failed (HTTP %s).\n' "${model}" "${http_status}" >&2
+        err_msg=""
+        err_reason=""
+        if [[ -n "${body}" ]]; then
+            err_msg="$(jq -r '.error.message // empty' <<<"${body}" 2>/dev/null)"
+            err_reason="$(jq -r '[.error.details[]?.reason // empty] | join(",")' <<<"${body}" 2>/dev/null)"
+        fi
+        err_msg="${err_msg%%$'\n'*}"
+        printf 'Warning: Model %s failed (HTTP %s)%s\n' "${model}" "${http_status}" "${err_msg:+: ${err_msg:0:300}}" >&2
+        # Key problems are identical for every model: stop instead of retrying the whole rotation.
+        if [[ "${http_status}" == "401" || "${http_status}" == "403" || "${err_reason}" == *API_KEY_INVALID* ]]; then
+            printf 'Error: Gemini API key was rejected\n' >&2
+            printf "Run 'gemini-key set' or export a valid GEMINI_API_KEY\n" >&2
+            exit 12
+        fi
         continue
     fi
-    text="$(jq -r '[.candidates[0].content.parts[]?.text // empty] | join("\n")' <<<"${response%$'\n'*}" 2>/dev/null)"
+    text="$(jq -r '[.candidates[0].content.parts[]?.text // empty] | join("\n")' <<<"${body}" 2>/dev/null)"
     text="${text#"${text%%[![:space:]]*}"}"
     text="${text%"${text##*[![:space:]]}"}"
     if [[ "${text}" =~ ^\`\`\`([a-zA-Z0-9_-]+)?[[:space:]]*$'\n'(.*)$'\n'\`\`\`$ ]]; then
