@@ -83,7 +83,7 @@ Command-line flags always take precedence over values defined in the configurati
 ## Version File (`VERSION`)
 
 `ggrel` always manages a `VERSION` file in the root of the repository. You never need to pass or configure a version file path.
-- If `VERSION` does not exist, `ggrel` automatically creates it initialized with version `0.0.0`.
+- If `VERSION` does not exist, `ggrel` creates it during the release (dry runs never touch it).
 - During the release process, `ggrel` updates `VERSION` to the user-specified target version, stages it (`git add VERSION`), and commits it as `chore(release): bump version to v<version>` before creating the release tag.
 
 ---
